@@ -12,7 +12,8 @@ fi
 
 if [ ! -x ".venv/bin/python" ]; then
   PY=""
-  for c in python3 python; do
+  # Prefer versions every dependency has packages for (the newest Python can be ahead of some).
+  for c in python3.14 python3.13 python3.12 python3.11 python3 python; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
       PY="$c"; break
     fi

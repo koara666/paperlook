@@ -17,8 +17,20 @@ if exist ".venv\Scripts\python.exe" (
 if exist ".venv\Scripts\python.exe" goto deps
 
 echo [PaperLook] First start: creating the Python environment...
+rem Prefer a Python that every dependency has packages for (3.11-3.14); the newest release can
+rem be ahead of some packages (e.g. onnxruntime had no Python 3.15 build yet in 2026-10).
+set "PYCMD="
 where py >nul 2>nul
-if %errorlevel%==0 (py -3 -m venv .venv) else (python -m venv .venv)
+if %errorlevel%==0 (
+  for %%v in (3.14 3.13 3.12 3.11) do (
+    if not defined PYCMD (
+      py -%%v -c "import sys" >nul 2>nul && set "PYCMD=py -%%v"
+    )
+  )
+  if not defined PYCMD set "PYCMD=py -3"
+)
+if not defined PYCMD set "PYCMD=python"
+%PYCMD% -m venv .venv
 if not exist ".venv\Scripts\python.exe" goto nopython
 ".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" || (
   rmdir /s /q ".venv"

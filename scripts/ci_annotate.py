@@ -8,10 +8,16 @@ a developer without a GitHub token see why a job failed:
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
-TAIL = 6000
+TAIL = 2500  # GitHub truncates long annotation messages
+ERROR_LINE = re.compile(r"error|exception|traceback|failed|not found|no matching", re.I)
+
+
+def emit(title: str, text: str) -> None:
+    print(f"::error title={title}::" + text.replace("%", "%25").replace("\r", "").replace("\n", "%0A"))
 
 
 def main() -> int:
@@ -19,11 +25,13 @@ def main() -> int:
     for name in sys.argv[1:]:
         p = Path(name)
         if not p.exists():
-            print(f"::error title={p.name}::(file not found)")
+            emit(p.name, "(file not found)")
             continue
-        text = p.read_text(encoding="utf-8", errors="replace").replace("\r", "")
-        tail = text[-TAIL:]
-        print(f"::error title={p.name}::" + tail.replace("%", "%25").replace("\n", "%0A"))
+        lines = p.read_text(encoding="utf-8", errors="replace").replace("\r", "").splitlines()
+        errors = [ln for ln in lines if ERROR_LINE.search(ln)]
+        if errors:
+            emit(f"{p.name}: error lines", "\n".join(errors[-25:])[-TAIL:])
+        emit(f"{p.name}: last lines", "\n".join(lines)[-TAIL:])
     return 0
 
 

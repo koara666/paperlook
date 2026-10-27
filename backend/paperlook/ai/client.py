@@ -174,6 +174,8 @@ class BaseClient:
                 return parse_json(res.content), res
             except ValueError as e:
                 last_err = AIError(f"模型返回的 JSON 格式无效：{e}", "bad_json", retryable=True)
+                log.warning("%s %s: invalid JSON (%s), %s", self.label, kwargs.get("kind") or "chat", e,
+                            "retrying" if attempt == 0 else "giving up")
         assert last_err is not None
         raise last_err
 
@@ -577,16 +579,90 @@ def parse_json(text: str) -> dict[str, Any]:
     if t.startswith("```"):
         t = re.sub(r"^```(?:json)?\s*", "", t)
         t = re.sub(r"\s*```$", "", t)
+    t = _fix_latex_escapes(t)
     try:
         val = json.loads(t)
     except json.JSONDecodeError:
         start, end = t.find("{"), t.rfind("}")
         if start < 0 or end <= start:
             raise ValueError("未找到 JSON 对象")
-        val = json.loads(t[start:end + 1])
+        t = t[start:end + 1]
+        try:
+            val = json.loads(t)
+        except json.JSONDecodeError:
+            fixed = _fix_closers(t)
+            if fixed is None:
+                raise
+            try:
+                val = json.loads(fixed)
+            except json.JSONDecodeError:
+                raise ValueError(f"JSON 无法解析（括号已尝试修复）：{t[-80:]!r}") from None
     if not isinstance(val, dict):
         raise ValueError("顶层不是 JSON 对象")
     return val
+
+
+# A backslash escape in model JSON: an escaped backslash, a \uXXXX escape, a LaTeX command that starts
+# like a JSON escape (\frac, \text, \beta, \right, \nabla …), or any other single character.
+_ESCAPE = re.compile(
+    r"\\(?:(?P<ok>[\\\"/]|u[0-9a-fA-F]{4})"
+    r"|(?P<latex>[bfr](?=[A-Za-z])"
+    r"|t(?=(?:ext[a-z]*|heta|imes|op|au|ilde|o|anh|riangle[a-z]*|frac|binom)(?![A-Za-z]))"
+    r"|n(?=(?:abla|eq|u|otin|eg|leq|geq|subseteq|olimits|onumber|ewline|exists|mid)(?![A-Za-z])))"
+    r"|(?P<other>.))",
+    re.S,
+)
+
+
+def _fix_latex_escapes(t: str) -> str:
+    r"""Escape LaTeX backslashes the model forgot to double inside JSON strings.
+
+    Gemini (seen on gemini-3.5-flash-lite) writes `\\mathbf{W}` in short replies but often plain
+    `\mathbf{W}` in long analyses: invalid escapes then fail the whole reply, and valid-looking ones
+    (`\frac`, `\text`, `\beta`, `\rho`, `\nabla`) silently turn into control characters. Those are
+    never meant as form feeds or backspaces in this app's output, so they are read as LaTeX; newline and
+    tab escapes only when a LaTeX command name follows (nabla, text, theta …). Correct JSON is unchanged."""
+    def repl(m: re.Match[str]) -> str:
+        if m.group("ok"):
+            return m.group(0)
+        if m.group("latex"):
+            return "\\\\" + m.group("latex")
+        ch = m.group("other")
+        return m.group(0) if ch in "bfnrt" else "\\\\" + ch  # plain \n, \t … ; anything else is LaTeX
+
+    return _ESCAPE.sub(repl, t) if "\\" in t else t
+
+
+def _fix_closers(t: str) -> str | None:
+    """Replace wrong closing brackets outside strings with the one the nesting expects.
+
+    Gemini's JSON mode occasionally ends an array with `>` (seen on gemini-3.5-flash-lite in two of
+    twelve glossary replies); repairing it locally saves a whole re-request. `>` and `)` are never
+    valid outside JSON strings, so swapping them (or a `}`/`]` mix-up) only restores the intended
+    structure. Returns None when there is nothing to fix; the caller still has to parse the result."""
+    out: list[str] = []
+    stack: list[str] = []
+    in_str = esc = changed = False
+    for ch in t:
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append("}" if ch == "{" else "]")
+        elif ch in "}]>)":
+            if not stack:
+                return None
+            want = stack.pop()
+            changed = changed or ch != want
+            ch = want
+        out.append(ch)
+    return "".join(out) if changed else None
 
 
 _usage_lock = threading.Lock()

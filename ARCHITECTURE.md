@@ -124,7 +124,7 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 
 ## 6. AI 服务接入
 
-`settings.ai.provider` 选择 `deepseek`（默认）或 `gemini`；`ai/client.get_client()` 返回对应客户端，翻译/分析代码只用 `chat` / `chat_json`。两者共用：重试（可重试错误退避，服务端给出 `retry_after` 时按它等待）、JSON 截断时加大输出上限重试、JSON 解析失败重试一次、`api_usage` 记账。Key 分别存为 `deepseek_api_key` / `gemini_api_key`。
+`settings.ai.provider` 选择 `deepseek`（默认）或 `gemini`；`ai/client.get_client()` 返回对应客户端，翻译/分析代码只用 `chat` / `chat_json`。两者共用：重试（可重试错误退避，服务端给出 `retry_after` 时按它等待）、JSON 截断时加大输出上限重试、JSON 解析失败重试一次（写 warning 日志）、`api_usage` 记账。`parse_json` 在解析前把未转义的 LaTeX 反斜杠读作 LaTeX（`_fix_latex_escapes`：非法转义一律加倍；`\f`/`\b`/`\r` 后跟字母、`\t`/`\n` 后跟 LaTeX 命令名时也视为 LaTeX，正确转义的 JSON 不变），解析失败时再修正用错的结束括号（`_fix_closers`，如 `>` → `]`）。这两种错误都在真实的 gemini-3.5-flash-lite 输出中出现过。Key 分别存为 `deepseek_api_key` / `gemini_api_key`。
 
 ### 6.1 DeepSeek
 

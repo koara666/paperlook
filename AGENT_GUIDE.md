@@ -66,6 +66,8 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 - 新 AI 服务：在 `ai/client.py` 实现 `BaseClient` 子类（`_send`、`list_models`、错误映射为中文 `AIError`），注册到 `PROVIDERS` 与 `make_client`，Key 名加到 `secrets_store`，设置加到 `settings_store`（`ai.<provider>`），并扩展模拟服务与测试。
 - 改了打包相关代码（`desktop.py`、`config.py`、`packaging/`、新增依赖）：本地运行 `packaging/build_windows.ps1 -SmokeTest` 确认 exe 能启动；新依赖若靠动态导入或入口点加载，要在 `paperlook.spec` 补 `hiddenimports` / `copy_metadata`。
 - 不要提交 `data/`、`.venv/`、`node_modules/`、任何 Key（见 `.gitignore`）。
+- 模型的 JSON 输出由 `client.parse_json` 读取，它会修正 Gemini 常见的错误（未转义的 LaTeX 反斜杠、用错的结束括号）；改动它时跑 `backend/tests/test_ai_json.py`，并确认正确的 JSON 读取结果不变。
+- 含反斜杠的文件内容（测试、提示词、LaTeX）用编辑工具写入，不要用 Git Bash 的 heredoc：`\\` 可能被折叠成 `\`。
 - 用户可见文字使用简体中文。
 - 完成一轮工作后更新 `PROJECT_STATUS.md`（已完成/未完成/已知问题/测试结果/日期），必要时更新 `ARCHITECTURE.md` 与 `README.md`。
 
@@ -103,7 +105,7 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 1. 读 `PROJECT_STATUS.md` 的「尚未实现」「已知问题」「下一步建议」。
 2. 启动应用（临时数据目录）确认当前可用；跑 `pytest`。
 3. 选定任务 → 小步实现 → 测试 → 浏览器验证 → 更新文档。
-4. 真实 DeepSeek（deepseek-flash）已于 2026-10-27 验证通过；Gemini 只用模拟服务验证过（开发机没有 Gemini Key）。用户的 Key 在系统凭据管理器中：用临时数据目录启动测试实例（不设 `PAPERLOOK_DISABLE_KEYRING`）即可复用该 Key 做真实验证，但会消耗用户余额，只在必要时少量使用；日常开发用模拟服务。
+4. 真实 DeepSeek（deepseek-flash）已于 2026-10-27、真实 Gemini（gemini-3.5-flash-lite，免费档）已于 2026-10-28 验证通过。安装版的数据在 `%LOCALAPPDATA%\PaperLook`：需要用户的真实论文时，用 sqlite 只读备份到临时目录再启动测试实例，不要直接操作安装版的数据或正在运行的窗口。用户的 Key 在系统凭据管理器中：用临时数据目录启动测试实例（不设 `PAPERLOOK_DISABLE_KEYRING`）即可复用该 Key 做真实验证，但会消耗用户余额，只在必要时少量使用；日常开发用模拟服务。
 5. 仓库已发布在 <https://github.com/koara666/paperlook>（作者身份 koara666 <luoyu6867@gmail.com>）。提交前确认 `data/`、`.venv/`、密钥不在提交中（`.gitignore` 已覆盖）；改了 `start.bat` 等脚本要保持 CRLF（`.gitattributes` 已约束）。推送失败提示连不上 `127.0.0.1:7897` 时，是全局 git 代理没在运行，可用 `git -c http.proxy= -c https.proxy= push` 直连。
 
 ## 9. 「完整可用」的判定清单

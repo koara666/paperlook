@@ -10,6 +10,15 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 
 ## [未发布]
 
+## [1.1.1] - 2026-10-28
+
+### 修复
+- **Gemini 的关键模块公式无法显示**：Gemini 在较长的分析结果中常把公式里的反斜杠省略（`\prod` 变成 `prod`），或在 JSON 中不转义（这时整条结果会报「模型返回的 JSON 格式无效」）。现在提示词要求保留反斜杠，程序也能正确读取未转义的公式；DeepSeek 的结果读取方式不变。
+- Gemini 偶尔用错 JSON 的结束括号（例如用 `>` 结束列表），之前会整条重新请求、多用一次免费额度，现在直接修正。
+- 创新点的「解决的问题」有时是英文，现在要求用中文概括。
+- 术语表不再出现「豪斯holder反射」这类中英混杂的半音译，人名术语没有通用中文译名时保留英文（Householder 反射）。
+- AI 返回的内容无法解析而自动重试时，会写入日志，便于排查。
+
 ### 开发
 - GitHub Actions 组件升级到 Node.js 24 版本（checkout / setup-python / setup-node / upload-artifact v7、action-gh-release v3），消除 Node.js 20 弃用警告。
 
@@ -49,6 +58,7 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 - 论文库、收藏/已读/隐藏、备份导出与导入、深色模式、手机宽度适配。
 - `start.bat` 一键启动（自动创建环境、国内镜像兜底）。
 
-[未发布]: https://github.com/koara666/paperlook/compare/v1.1.0...HEAD
+[未发布]: https://github.com/koara666/paperlook/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/koara666/paperlook/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/koara666/paperlook/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/koara666/paperlook/releases/tag/v1.0.0

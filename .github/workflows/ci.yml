@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端测试 (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, python: "3.14" }  # the developer's own setup
+          - { os: windows-latest, python: "3.13" }  # the Python bundled into the desktop app
+          - { os: ubuntu-latest, python: "3.10" }   # oldest supported version
+          - { os: macos-latest, python: "3.13" }
+    env:
+      PYTHONUTF8: "1"
+      PAPERLOOK_DISABLE_KEYRING: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+      - name: pytest
+        run: python -m pytest backend/tests -q
+
+  frontend:
+    name: 前端构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - name: 类型检查 + 构建
+        run: npm run build
+        working-directory: frontend
+      - name: 检查提交的构建产物与源码一致
+        run: |
+          if [ -n "$(git status --porcelain -- backend/paperlook/static)" ]; then
+            git status --short -- backend/paperlook/static
+            echo "::error::backend/paperlook/static 与 frontend 源码不一致：请在 frontend 目录运行 npm run build 并提交构建结果。"
+            exit 1
+          fi
+
+  launcher:
+    name: 启动脚本冒烟测试 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest, macos-latest]
+    env:
+      PAPERLOOK_DISABLE_KEYRING: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 用 start 脚本启动（全新环境，首次安装依赖）
+        shell: bash
+        run: |
+          export PAPERLOOK_DATA_DIR="$RUNNER_TEMP/paperlook-data"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cmd //c "start.bat --no-browser" > "$RUNNER_TEMP/app.log" 2>&1 &
+          else
+            ./start.sh --no-browser > "$RUNNER_TEMP/app.log" 2>&1 &
+          fi
+          for i in $(seq 1 120); do
+            if curl -fs http://127.0.0.1:8765/api/health; then echo; break; fi
+            sleep 3
+          done
+          curl -fs http://127.0.0.1:8765/api/health | grep -q '"app":"PaperLook"' || { cat "$RUNNER_TEMP/app.log"; exit 1; }
+          curl -fs http://127.0.0.1:8765/ | grep -q 'id="root"' || { echo "首页没有返回前端页面"; exit 1; }
+          curl -fs http://127.0.0.1:8765/api/settings > /dev/null
+          echo "启动成功"

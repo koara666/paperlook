@@ -20,7 +20,8 @@ STATIC_DIR = PACKAGE_DIR / "static"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 
-USER_AGENT = f"PaperLook/{VERSION} (personal research reader; +https://github.com/)"
+GITHUB_REPO = "koara666/paperlook"
+USER_AGENT = f"PaperLook/{VERSION} (personal research reader; +https://github.com/{GITHUB_REPO})"
 
 # Service name used for the OS credential store (Windows Credential Manager / macOS Keychain).
 KEYRING_SERVICE = "PaperLook"

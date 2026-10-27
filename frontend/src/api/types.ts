@@ -377,6 +377,15 @@ export interface SystemStatus {
   active_jobs: number;
 }
 
+export interface UpdateInfo {
+  current: string;
+  latest: string | null;
+  has_update: boolean;
+  url: string;
+  published_at?: string | null;
+  notes?: string;
+}
+
 export interface LibraryItem {
   paper: PaperCard;
   ai_status: AiStatusSummary;

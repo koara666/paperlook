@@ -3,8 +3,12 @@
 *.ps1   text eol=crlf
 *.sh    text eol=lf
 
-# Prebuilt frontend: never diff or normalise.
-backend/paperlook/static/** -diff
+# Frontend sources are LF on every OS, so `npm run build` produces byte-identical output on
+# Windows and on CI (which checks that the committed build matches the sources).
+frontend/** text=auto eol=lf
+
+# Prebuilt frontend: stored byte-for-byte, never diffed or normalised.
+backend/paperlook/static/** -text -diff
 *.ico   binary
 *.png   binary
 *.woff2 binary

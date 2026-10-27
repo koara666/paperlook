@@ -1,9 +1,9 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, ChevronDown, Copy, Download, ExternalLink, HardDrive, Info, KeyRound, Trash2, Upload, XCircle } from "lucide-react";
+import { CheckCircle2, ChevronDown, Copy, Download, ExternalLink, HardDrive, Info, KeyRound, RefreshCw, Trash2, Upload, XCircle } from "lucide-react";
 import { useRef, useState, type ReactNode } from "react";
 import { api, errorMessage } from "../../api/client";
 import { useSettings, useSources, useStatus, useUpdateSettings } from "../../api/hooks";
-import type { Settings, SourceInfo } from "../../api/types";
+import type { Settings, SourceInfo, UpdateInfo } from "../../api/types";
 import { useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Field, Input, Notice, Segmented, Skeleton, Switch } from "../../components/ui/primitives";
 import { cn } from "../../lib/cn";
@@ -531,7 +531,10 @@ export function DataSection() {
           <Field label="关于">
             <div className="grid grid-cols-[100px_1fr] gap-y-1.5 text-[13px]">
               <span className="text-text-3">版本</span>
-              <span className="text-text">PaperLook {st.version}</span>
+              <span className="text-text">
+                PaperLook {st.version}
+                <UpdateCheck />
+              </span>
               <span className="text-text-3">Python</span>
               <span className="text-text">{st.python}</span>
               <span className="text-text-3">密钥存储</span>
@@ -543,5 +546,34 @@ export function DataSection() {
         </Card>
       )}
     </div>
+  );
+}
+
+function UpdateCheck() {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const [info, setInfo] = useState<UpdateInfo | null>(null);
+  const check = async () => {
+    setBusy(true);
+    try {
+      const r = await api.get<UpdateInfo>("/update");
+      setInfo(r);
+      if (!r.has_update) toast({ tone: "success", title: "已是最新版本", description: r.latest ? `最新发布版本为 ${r.latest}` : "GitHub 上还没有发布版本" });
+    } catch (e) {
+      toast({ tone: "error", title: "检查更新失败", description: errorMessage(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (info?.has_update)
+    return (
+      <a href={info.url} target="_blank" rel="noreferrer" className="ml-2 inline-flex items-center gap-1 text-accent-text hover:underline">
+        有新版本 {info.latest}，前往下载 <ExternalLink className="size-3" />
+      </a>
+    );
+  return (
+    <button onClick={check} disabled={busy} className="ml-2 inline-flex items-center gap-1 text-xs text-text-3 hover:text-text disabled:opacity-60">
+      <RefreshCw className={cn("size-3", busy && "animate-spin")} /> 检查更新
+    </button>
   );
 }

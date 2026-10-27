@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import platform
+import re
 import time
 
+import httpx
 from fastapi import APIRouter
 
 from .. import config, db, secrets_store
+from ..errors import AppError
 from ..ai.client import is_configured, usage_summary
 from ..jobs import manager
 
@@ -38,6 +41,41 @@ def status():
         "python": platform.python_version(),
         "uptime_seconds": int(time.time() - STARTED),
         "active_jobs": len(manager.active()),
+    }
+
+
+def parse_version(v: str) -> tuple[int, int, int, int, str] | None:
+    """SemVer -> sortable tuple; a pre-release (1.1.0-beta.1) sorts before its release (1.1.0)."""
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$", (v or "").strip())
+    if not m:
+        return None
+    pre = m.group(4) or ""
+    return int(m.group(1)), int(m.group(2)), int(m.group(3)), 0 if pre else 1, pre
+
+
+@router.get("/update")
+def check_update():
+    """Explicit (button) check of the latest GitHub release. Nothing is downloaded or installed."""
+    url = f"https://api.github.com/repos/{config.GITHUB_REPO}/releases/latest"
+    try:
+        r = httpx.get(url, timeout=15, headers={"User-Agent": config.USER_AGENT, "Accept": "application/vnd.github+json"})
+    except httpx.HTTPError as e:
+        raise AppError(f"无法连接 GitHub 检查更新（{type(e).__name__}），请检查网络后重试。", code="network")
+    if r.status_code == 404:
+        return {"current": config.VERSION, "latest": None, "has_update": False,
+                "url": f"https://github.com/{config.GITHUB_REPO}/releases"}
+    if r.status_code != 200:
+        raise AppError(f"GitHub 暂时无法访问（HTTP {r.status_code}），请稍后重试。", code="network")
+    rel = r.json()
+    latest = str(rel.get("tag_name") or "").removeprefix("v")
+    cur, new = parse_version(config.VERSION), parse_version(latest)
+    return {
+        "current": config.VERSION,
+        "latest": latest or None,
+        "has_update": bool(cur and new and new > cur),
+        "url": rel.get("html_url") or f"https://github.com/{config.GITHUB_REPO}/releases",
+        "published_at": rel.get("published_at"),
+        "notes": (rel.get("body") or "")[:4000],
     }
 
 

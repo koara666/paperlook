@@ -14,3 +14,6 @@ backend/paperlook/static/** -text -diff
 *.woff2 binary
 *.woff  binary
 *.ttf   binary
+
+# Inno Setup messages file: keep the UTF-8 BOM and CRLF exactly as committed
+packaging/*.isl -text

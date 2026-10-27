@@ -6,7 +6,7 @@ import { DirectionsSection } from "./settings/DirectionsSection";
 import { DataSection, FeaturesSection, ReadingSection, RecommendSection, SourcesSection } from "./settings/OtherSections";
 
 const SECTIONS = [
-  { key: "ai", label: "AI 服务", icon: Bot, desc: "DeepSeek API 配置" },
+  { key: "ai", label: "AI 服务", icon: Bot, desc: "DeepSeek / Gemini 配置" },
   { key: "directions", label: "研究方向", icon: Compass, desc: "关注的领域与关键词" },
   { key: "recommend", label: "推荐设置", icon: SlidersHorizontal, desc: "数量、时间与排序" },
   { key: "sources", label: "论文来源", icon: Globe, desc: "选择检索的数据库" },

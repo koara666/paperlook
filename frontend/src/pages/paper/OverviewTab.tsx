@@ -1,6 +1,7 @@
 import { ArrowRight, Check, ExternalLink, Info, KeyRound, Languages, Layers, Lightbulb, Loader2, NotebookText, Sparkles, TriangleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useState, type ReactNode } from "react";
+import { useAiLabel } from "../../api/hooks";
 import type { FeatureState, PaperDetail } from "../../api/types";
 import { BreakdownPanel, ScoreRing } from "../../components/papers/Score";
 import { Badge, Button, Card, SectionTitle } from "../../components/ui/primitives";
@@ -71,6 +72,7 @@ export function OverviewTab({ detail, go }: { detail: PaperDetail; go: (t: Tab, 
   const [showZh, setShowZh] = useState(true);
   const summary = detail.ai.summary.result?.content;
   const noAi = !detail.ai_configured;
+  const aiLabel = useAiLabel();
 
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
@@ -143,7 +145,7 @@ export function OverviewTab({ detail, go }: { detail: PaperDetail; go: (t: Tab, 
         <div>
           <SectionTitle
             title="AI 精读工具"
-            extra={<span className="text-xs text-text-3">{noAi ? "需要先配置 DeepSeek API Key" : "点击后才会调用 DeepSeek，结果自动保存"}</span>}
+            extra={<span className="text-xs text-text-3">{noAi ? "需要先配置 AI 服务的 API Key" : `点击后才会调用 ${aiLabel}，结果自动保存`}</span>}
           />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <ActionTile icon={<Languages className="size-4" />} title="全文翻译" desc="保留章节、公式与图表的逐段翻译" st={detail.ai.translate} isTranslate

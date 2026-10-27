@@ -192,7 +192,7 @@ def _ai_rerank(job: Job, scored: list[ranker.Scored], compiled, weights, count: 
     from ..ai.client import is_configured
 
     if not is_configured():
-        return {"used": False, "note": "已开启 AI 精排，但尚未配置 DeepSeek API Key，本次使用常规排序。"}
+        return {"used": False, "note": "已开启 AI 精排，但尚未配置 AI 服务的 API Key，本次使用常规排序。"}
     pool = sorted(scored, key=lambda s: s.score, reverse=True)[: min(40, max(20, count * 4))]
     job.update(message=f"AI 精排中（{len(pool)} 篇候选）…", force=True)
     try:

@@ -24,10 +24,11 @@ _mem: dict[str, str] = {}  # in-process cache, avoids hitting the credential sto
 
 # Known secret names.
 DEEPSEEK = "deepseek_api_key"
+GEMINI = "gemini_api_key"
 OPENALEX = "openalex_api_key"
 SEMANTIC_SCHOLAR = "semantic_scholar_api_key"
 PUBMED = "pubmed_api_key"
-ALL_NAMES = (DEEPSEEK, OPENALEX, SEMANTIC_SCHOLAR, PUBMED)
+ALL_NAMES = (DEEPSEEK, GEMINI, OPENALEX, SEMANTIC_SCHOLAR, PUBMED)
 
 
 def _fallback_path():

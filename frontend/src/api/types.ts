@@ -323,7 +323,28 @@ export interface SourcesResponse {
   signals: { id: string; name: string; enabled: boolean; description: string }[];
 }
 
+export type AiProvider = "deepseek" | "gemini";
+
+export interface ProviderConfig {
+  configured: boolean;
+  key_masked: string | null;
+  label: string;
+  base_url: string;
+  model: string;
+  models: string[];
+  last_test: { ok: boolean; at: string; error?: string; steps?: TestStep[] } | null;
+  // Gemini only
+  proxy?: string;
+  free_tier?: boolean;
+  rpm?: number;
+  requests_today?: Record<string, number>;
+  reset_hour_beijing?: number;
+}
+
 export interface AiConfig {
+  provider: AiProvider;
+  providers: Record<AiProvider, ProviderConfig>;
+  label: string;
   configured: boolean;
   key_masked: string | null;
   base_url: string;
@@ -331,7 +352,7 @@ export interface AiConfig {
   models: string[];
   thinking_for_analysis: boolean;
   secret_backend: string;
-  last_test: { ok: boolean; at: string; error?: string; steps?: TestStep[] } | null;
+  last_test: ProviderConfig["last_test"];
 }
 
 export interface TestStep {
@@ -342,6 +363,8 @@ export interface TestStep {
 
 export interface TestResult {
   at?: string;
+  provider?: AiProvider;
+  message?: string;
   ok: boolean;
   steps: TestStep[];
   error?: string;

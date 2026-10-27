@@ -237,14 +237,14 @@ function Onboarding({ onDone }: { onDone: () => void }) {
         <div>
           <div className="mb-2 flex items-center gap-2">
             <span className="flex size-6 items-center justify-center rounded-full bg-surface-3 text-xs font-semibold text-text-2">2</span>
-            <h3 className="font-semibold text-text">配置 DeepSeek（可选）</h3>
+            <h3 className="font-semibold text-text">配置 AI 服务（可选）</h3>
           </div>
           <p className="pl-8 text-[13px] leading-relaxed text-text-2">
             {ai?.configured ? (
-              <span className="text-success">✓ 已配置 DeepSeek API Key，AI 功能可用。</span>
+              <span className="text-success">✓ 已配置 {ai.label} API Key，AI 功能可用。</span>
             ) : (
               <>
-                全文翻译、论文总结等 AI 功能需要 DeepSeek API Key。论文推荐本身不需要，
+                全文翻译、论文总结等 AI 功能需要 DeepSeek（付费，很便宜）或 Gemini（有免费额度）的 API Key。论文推荐本身不需要，
                 <Link to="/settings?s=ai" className="text-accent-text hover:underline">
                   现在配置
                 </Link>
@@ -462,7 +462,7 @@ export default function TodayPage() {
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <QuickControls />
             {aiRerank && (
-              <Tooltip align="end" content="已开启 AI 精排：每次获取推荐会调用一次 DeepSeek（约 1-2 万 tokens）。可在设置中关闭。">
+              <Tooltip align="end" content="已开启 AI 精排：每次获取推荐会调用一次 AI（约 1-2 万 tokens）。可在设置中关闭。">
                 <Badge tone="accent" icon={<Wand2 className="size-3" />}>
                   AI 精排已开启
                 </Badge>
@@ -564,12 +564,12 @@ function AiHint() {
       action={
         <Link to="/settings?s=ai">
           <Button size="sm" variant="primary">
-            配置 DeepSeek
+            配置 AI 服务
           </Button>
         </Link>
       }
     >
-      填写 DeepSeek API Key 后，即可在论文详情页一键翻译全文、生成总结、分析关键模块与创新点。
+      填写 DeepSeek 或 Gemini 的 API Key 后，即可在论文详情页一键翻译全文、生成总结、分析关键模块与创新点。Gemini 有免费额度（需要代理）。
     </Notice>
   );
 }

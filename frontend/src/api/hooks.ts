@@ -164,6 +164,22 @@ export function useAiConfig() {
   return useQuery({ queryKey: ["ai-config"], queryFn: () => api.get<AiConfig>("/ai/config") });
 }
 
+/** Name of the active AI service ("DeepSeek" / "Gemini") for UI text. */
+export function useAiLabel() {
+  const { data } = useAiConfig();
+  return data?.label ?? "AI 服务";
+}
+
+/** Gemini free tier counts requests, not tokens: rough number of requests to translate a paper. */
+export function useTranslateRequests(words: number | undefined) {
+  const { data } = useAiConfig();
+  if (data?.provider !== "gemini") return null;
+  // measured on real papers: ~7.3 characters per word, ~11k (free tier) / ~3.4k characters per request
+  const chars = (words ?? 6000) * 7.3;
+  const per = data.providers.gemini.free_tier ? 11000 : 3400;
+  return Math.ceil(chars / per) + 1;
+}
+
 export function useUsage() {
   return useQuery({ queryKey: ["usage"], queryFn: () => api.get<Usage>("/usage") });
 }

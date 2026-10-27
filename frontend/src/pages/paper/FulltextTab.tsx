@@ -21,7 +21,7 @@ import {
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, errorMessage } from "../../api/client";
-import { isActive, useFulltext, useJob, useSettings, useUpdateSettings } from "../../api/hooks";
+import { isActive, useAiLabel, useFulltext, useJob, useSettings, useTranslateRequests, useUpdateSettings } from "../../api/hooks";
 import type { Block, FullDoc, FulltextResponse, Job, PaperDetail, Section } from "../../api/types";
 import { Dialog, MenuItem, Popover, Tooltip, useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Notice, ProgressBar, Segmented, Skeleton } from "../../components/ui/primitives";
@@ -323,6 +323,8 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
   const qc = useQueryClient();
   const toast = useToast();
   const confirm = useConfirm();
+  const aiLabel = useAiLabel();
+  const reqs = useTranslateRequests(detail.fulltext?.stats?.words);
   const { data: settings } = useSettings();
   const update = useUpdateSettings();
   const runAi = useAiRunner(detail.paper.id);
@@ -525,7 +527,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
             ) : !detail.ai_configured ? (
               <Link to="/settings?s=ai">
                 <Button size="sm" variant="soft" icon={<Languages className="size-3.5" />}>
-                  配置 DeepSeek 后可翻译
+                  配置 AI 服务后可翻译
                 </Button>
               </Link>
             ) : (
@@ -535,7 +537,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                     已翻译 {done}/{total} 段
                   </span>
                 )}
-                <Tooltip side="bottom" align="end" content={`调用 DeepSeek 翻译全文（预计约 ${estimateTokens(detail, (detail.fulltext?.stats?.words ?? 6000) / 500)} tokens）。已翻译的部分会保存，中断后可继续。`}>
+                <Tooltip side="bottom" align="end" content={`调用 ${aiLabel} 翻译全文（预计约 ${estimateTokens(detail, (detail.fulltext?.stats?.words ?? 6000) / 500)} tokens${reqs ? `，约 ${reqs} 次请求` : ""}）。已翻译的部分会保存，中断后可继续。`}>
                   <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} onClick={() => startTranslate()}>
                     {done > 0 ? `继续翻译（剩余 ${total - done} 段）` : "全文翻译"}
                   </Button>
@@ -599,7 +601,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                       icon={<RotateCcw className="size-4" />}
                       onClick={async () => {
                         close();
-                        if (await confirm({ title: "重新翻译全文？", description: "将删除现有译文并重新调用 DeepSeek 翻译整篇论文。", confirmText: "重新翻译", danger: true }))
+                        if (await confirm({ title: "重新翻译全文？", description: `将删除现有译文并重新调用 ${aiLabel} 翻译整篇论文。`, confirmText: "重新翻译", danger: true }))
                           startTranslate(undefined, true);
                       }}
                     >

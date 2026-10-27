@@ -21,8 +21,18 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Run the (non-AI) search automatically the first time the app is opened each day.
     "auto_fetch_on_open": False,
     "ai": {
+        "provider": "deepseek",  # deepseek | gemini
+        # DeepSeek (kept at the top level of "ai" for compatibility with 1.0 settings and backups)
         "base_url": "https://api.deepseek.com",
         "model": "deepseek-flash",
+        "gemini": {
+            "model": "gemini-3.5-flash-lite",
+            "base_url": "https://generativelanguage.googleapis.com",
+            # Empty = use the system proxy (Gemini is not reachable from mainland China without one).
+            "proxy": "",
+            # Free tier: rate-limit ourselves and use fewer, larger translation requests.
+            "free_tier": True,
+        },
         "thinking_for_analysis": False,
         "features": {"translate": True, "summary": True, "modules": True, "contributions": True},
         "translate_appendix": True,
@@ -90,6 +100,13 @@ def _validate(s: dict) -> dict:
     base_url = str(ai.get("base_url") or "").strip().rstrip("/")
     ai["base_url"] = base_url or d["ai"]["base_url"]
     ai["model"] = str(ai.get("model") or d["ai"]["model"]).strip()
+    if ai.get("provider") not in ("deepseek", "gemini"):
+        ai["provider"] = "deepseek"
+    g, dg = ai["gemini"], d["ai"]["gemini"]
+    g["model"] = str(g.get("model") or dg["model"]).strip().removeprefix("models/")
+    g["base_url"] = str(g.get("base_url") or "").strip().rstrip("/") or dg["base_url"]
+    g["proxy"] = str(g.get("proxy") or "").strip()
+    g["free_tier"] = bool(g.get("free_tier", True))
     if s["reading"].get("theme") not in ("system", "light", "dark"):
         s["reading"]["theme"] = "system"
     if s["reading"].get("font_size") not in ("sm", "md", "lg"):

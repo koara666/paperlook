@@ -1,13 +1,20 @@
-"""A local stand-in for the DeepSeek API (OpenAI-compatible) used for end-to-end testing
-without spending real tokens.
+"""A local stand-in for the DeepSeek API (OpenAI-compatible) and the Gemini API (native
+generateContent) used for end-to-end testing without spending real tokens or quota.
 
 Run:   python backend/tests/mock_deepseek.py [port]      (default 8790)
 Then in PaperLook: Settings -> AI 服务 -> 高级设置 -> 服务地址 = http://127.0.0.1:8790
+(the same address works for both DeepSeek and Gemini).
 
 Error injection by API key:
   sk-mock-401...  -> 401 on every call        sk-mock-402...  -> 402 on chat
   sk-mock-429...  -> 429 on the first chat call, then OK (tests retry)
   sk-mock-500...  -> 500 on chat              anything else   -> success
+Gemini keys (header x-goog-api-key):
+  AIza-mock-invalid...  -> 400 API_KEY_INVALID      AIza-mock-region...  -> 400 location not supported
+  AIza-mock-daily...    -> 429 per-day quota         AIza-mock-zero...    -> 429 quota limit 0
+  AIza-mock-rpm...      -> 429 per-minute (retryDelay 1s) on the first call, then OK
+  AIza-mock-strict...   -> rejects systemInstruction and thinkingLevel "minimal" (tests fallbacks)
+  anything else         -> success; models: gemini-3.5-flash-lite, gemini-3.8-flash
 Responses are deterministic and shaped like the real prompts' JSON schemas.
 """
 from __future__ import annotations
@@ -157,6 +164,91 @@ async def chat(req: Request):
         "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
         "usage": {"prompt_tokens": pt, "completion_tokens": ct, "total_tokens": pt + ct,
                   "prompt_cache_hit_tokens": 0, "prompt_cache_miss_tokens": pt},
+    }
+
+
+# ---------------- Gemini (native API) ----------------
+
+GEMINI_MODELS = ["gemini-3.5-flash-lite", "gemini-3.8-flash"]
+gemini_requests: list[dict] = []  # inspected by tests
+
+
+def _gkey(req: Request) -> str:
+    return (req.headers.get("x-goog-api-key") or "").strip()
+
+
+def _gerr(status: int, gstatus: str, msg: str, details: list | None = None):
+    return JSONResponse({"error": {"code": status, "message": msg, "status": gstatus, "details": details or []}},
+                        status_code=status)
+
+
+def _gemini_auth(key: str):
+    if key.startswith("AIza-mock-invalid"):
+        return _gerr(400, "INVALID_ARGUMENT", "API key not valid. Please pass a valid API key.",
+                     [{"@type": "type.googleapis.com/google.rpc.ErrorInfo", "reason": "API_KEY_INVALID",
+                       "domain": "googleapis.com"}])
+    return None
+
+
+@app.get("/v1beta/models")
+async def gemini_models(req: Request):
+    err = _gemini_auth(_gkey(req))
+    if err:
+        return err
+    models = [{"name": f"models/{m}", "supportedGenerationMethods": ["generateContent", "countTokens"]} for m in GEMINI_MODELS]
+    models += [{"name": "models/gemini-embedding-001", "supportedGenerationMethods": ["embedContent"]},
+               {"name": "models/gemini-3.8-flash-tts", "supportedGenerationMethods": ["generateContent"]}]
+    return {"models": models}
+
+
+def _quota(quota_id: str, value: str, retry: str | None = None):
+    details = [{"@type": "type.googleapis.com/google.rpc.QuotaFailure", "violations": [
+        {"quotaMetric": "generativelanguage.googleapis.com/generate_content_free_tier_requests",
+         "quotaId": quota_id, "quotaValue": value}]}]
+    if retry:
+        details.append({"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": retry})
+    return _gerr(429, "RESOURCE_EXHAUSTED", "You exceeded your current quota, please check your plan and billing details.",
+                 details)
+
+
+@app.post("/v1beta/models/{model}:generateContent")
+async def gemini_generate(model: str, req: Request):
+    key = _gkey(req)
+    err = _gemini_auth(key)
+    if err:
+        return err
+    body = await req.json()
+    gemini_requests.append({"model": model, "key": key, "body": body})
+    if key.startswith("AIza-mock-region"):
+        return _gerr(400, "FAILED_PRECONDITION", "User location is not supported for the API use.")
+    if key.startswith("AIza-mock-daily"):
+        return _quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "20")
+    if key.startswith("AIza-mock-zero"):
+        return _quota("GenerateRequestsPerDayPerProjectPerModel-FreeTier", "0")
+    if key.startswith("AIza-mock-rpm") and key not in _seen_429:
+        _seen_429.add(key)
+        return _quota("GenerateRequestsPerMinutePerProjectPerModel-FreeTier", "5", retry="1s")
+    if model not in GEMINI_MODELS:
+        return _gerr(404, "NOT_FOUND", f"models/{model} is not found for API version v1beta, or is not supported for generateContent.")
+    gen = body.get("generationConfig") or {}
+    if key.startswith("AIza-mock-strict"):
+        if "systemInstruction" in body:
+            return _gerr(400, "INVALID_ARGUMENT", "Developer instruction is not enabled for this model")
+        if (gen.get("thinkingConfig") or {}).get("thinkingLevel") == "minimal":
+            return _gerr(400, "INVALID_ARGUMENT", "Thinking level MINIMAL is not supported for this model.")
+    system = " ".join(p.get("text", "") for p in (body.get("systemInstruction") or {}).get("parts", []))
+    user = " ".join(p.get("text", "") for c in body.get("contents", []) if c.get("role") == "user" for p in c.get("parts", []))
+    if not system:  # system merged into the user turn (models without system instructions)
+        system = user
+    content = _route(system, user)
+    time.sleep(0.05)
+    pt = (len(system) + len(user)) // 3
+    ct = len(content) // 2
+    return {
+        "candidates": [{"content": {"role": "model", "parts": [{"text": content}]}, "finishReason": "STOP", "index": 0}],
+        "usageMetadata": {"promptTokenCount": pt, "candidatesTokenCount": ct, "thoughtsTokenCount": 7,
+                          "totalTokenCount": pt + ct + 7},
+        "modelVersion": model,
     }
 
 

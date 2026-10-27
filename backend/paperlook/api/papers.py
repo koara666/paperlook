@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .. import db, export, papers as papers_repo, settings_store
 from ..ai import analyze, translate
-from ..ai.client import is_configured
+from ..ai.client import is_configured, not_configured_error
 from ..errors import AppError
 from ..fulltext import fetcher
 from ..jobs import manager
@@ -213,7 +213,7 @@ def run_ai(paper_id: str, kind: str, body: AIRunIn):
     if kind not in AI_KINDS:
         raise AppError("未知的 AI 功能", status_code=404)
     if not is_configured():
-        raise AppError("尚未配置 DeepSeek API Key。请在「设置 → AI 服务」中填写后再使用 AI 功能。", code="not_configured")
+        raise not_configured_error()
     if not body.force and analyze.get_result(paper_id, kind):
         return {"status": "cached"}
     return manager.submit(f"ai:{kind}", lambda j: analyze.run(j, paper_id, kind), paper_id=paper_id).to_dict()
@@ -228,7 +228,7 @@ class TranslateIn(BaseModel):
 def run_translate(paper_id: str, body: TranslateIn):
     _require(paper_id)
     if not is_configured():
-        raise AppError("尚未配置 DeepSeek API Key。请在「设置 → AI 服务」中填写后再使用 AI 功能。", code="not_configured")
+        raise not_configured_error()
     active = manager.find_active("translate", paper_id)
     if active:
         return active.to_dict()

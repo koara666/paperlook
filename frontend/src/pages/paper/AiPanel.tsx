@@ -3,7 +3,7 @@ import { AlertCircle, FileText, KeyRound, Loader2, RotateCcw, Settings2, Sparkle
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { errorMessage } from "../../api/client";
-import { useRunAi } from "../../api/hooks";
+import { useAiLabel, useRunAi } from "../../api/hooks";
 import type { AiKind, FeatureState, PaperDetail } from "../../api/types";
 import { useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Notice, ProgressBar, Skeleton } from "../../components/ui/primitives";
@@ -61,6 +61,7 @@ export function AiPanel({
 }) {
   const runAi = useAiRunner(detail.paper.id);
   const confirm = useConfirm();
+  const aiLabel = useAiLabel();
   const res = state.result;
   const job = state.job;
 
@@ -70,8 +71,8 @@ export function AiPanel({
         <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-warning-soft text-warning">
           <KeyRound className="size-6" />
         </div>
-        <h3 className="text-base font-semibold text-text">需要先配置 DeepSeek API Key</h3>
-        <p className="mx-auto mt-1.5 max-w-md text-sm text-text-2">{title}需要调用 DeepSeek 模型。配置完成后回到这里点击按钮即可生成。</p>
+        <h3 className="text-base font-semibold text-text">需要先配置 {aiLabel} API Key</h3>
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-text-2">{title}需要调用 {aiLabel} 模型。配置完成后回到这里点击按钮即可生成。</p>
         <Link to="/settings?s=ai">
           <Button variant="primary" className="mt-5" icon={<Settings2 className="size-4" />}>
             前往配置
@@ -197,7 +198,7 @@ export function AiPanel({
           variant="ghost"
           icon={<RotateCcw className="size-3.5" />}
           onClick={async () => {
-            if (await confirm({ title: `重新生成${title}？`, description: `将再次调用 DeepSeek（预计约 ${estimateTokens(detail)} tokens），新结果会覆盖当前内容。`, confirmText: "重新生成" }))
+            if (await confirm({ title: `重新生成${title}？`, description: `将再次调用 ${aiLabel}（预计约 ${estimateTokens(detail)} tokens），新结果会覆盖当前内容。`, confirmText: "重新生成" }))
               runAi(kind, true);
           }}
         >

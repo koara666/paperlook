@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from typing import Any
 
@@ -8,7 +9,8 @@ from pydantic import BaseModel
 
 from .. import db, directions as dirs, secrets_store, settings_store
 from ..ai import prompts
-from ..ai.client import DEFAULT_MODELS, AIError, DeepSeekClient, get_client, is_configured
+from ..ai import client as ai_client
+from ..ai.client import DEFAULT_MODELS, GEMINI_DEFAULT_MODELS, PROVIDERS, AIError, get_client, is_configured
 from ..errors import AppError
 from ..sources import REGISTRY
 
@@ -176,22 +178,57 @@ def patch_source(source_id: str, body: SourcePatch):
     return list_sources()
 
 
-# ---------------- AI (DeepSeek) configuration ----------------
+# ---------------- AI service configuration (DeepSeek / Gemini) ----------------
+
+def _provider_config(provider: str) -> dict[str, Any]:
+    s = settings_store.get_settings()["ai"]
+    key = secrets_store.get_secret(PROVIDERS[provider]["secret"])
+    models = db.cache_get(f"{provider}_models") or []
+    if provider == "gemini":
+        g = s["gemini"]
+        return {
+            "configured": bool(key), "key_masked": secrets_store.mask(key), "label": PROVIDERS[provider]["label"],
+            "model": g["model"], "models": sorted(set(models) | set(GEMINI_DEFAULT_MODELS) | {g["model"]}),
+            "base_url": g["base_url"], "proxy": g["proxy"], "free_tier": g["free_tier"],
+            "rpm": ai_client.free_tier_rpm(g["model"]),
+            "requests_today": ai_client.gemini_requests_today(),
+            "reset_hour_beijing": ai_client.gemini_reset_hour_beijing(),
+            "last_test": db.cache_get("gemini_last_test"),
+        }
+    return {
+        "configured": bool(key), "key_masked": secrets_store.mask(key), "label": PROVIDERS[provider]["label"],
+        "model": s["model"], "models": sorted(set(models) | set(DEFAULT_MODELS) | {s["model"]}),
+        "base_url": s["base_url"], "last_test": db.cache_get("deepseek_last_test"),
+    }
+
 
 def _ai_config() -> dict[str, Any]:
     s = settings_store.get_settings()["ai"]
-    key = secrets_store.get_secret(secrets_store.DEEPSEEK)
-    models = db.cache_get("deepseek_models") or []
+    provider = s["provider"]
+    providers = {p: _provider_config(p) for p in PROVIDERS}
+    active = providers[provider]
     return {
-        "configured": bool(key),
-        "key_masked": secrets_store.mask(key),
-        "base_url": s["base_url"],
-        "model": s["model"],
-        "models": sorted(set(models) | set(DEFAULT_MODELS) | {s["model"]}),
+        "provider": provider,
+        "providers": providers,
+        # the active provider's fields, flattened (status badge, onboarding, …)
+        "label": active["label"],
+        "configured": active["configured"],
+        "key_masked": active["key_masked"],
+        "model": active["model"],
+        "models": active["models"],
+        "base_url": active["base_url"],
+        "last_test": active["last_test"],
         "thinking_for_analysis": s["thinking_for_analysis"],
         "secret_backend": secrets_store.backend_name(),
-        "last_test": db.cache_get("deepseek_last_test"),
     }
+
+
+def _provider(name: str | None) -> str:
+    if name is None:
+        return ai_client.active_provider()
+    if name not in PROVIDERS:
+        raise AppError("未知的 AI 服务", status_code=400)
+    return name
 
 
 @router.get("/ai/config")
@@ -201,96 +238,129 @@ def ai_config():
 
 class KeyIn(BaseModel):
     api_key: str
+    provider: str | None = None
 
 
 @router.put("/ai/key")
 def set_key(body: KeyIn):
+    provider = _provider(body.provider)
     key = body.api_key.strip()
     if len(key) < 10 or " " in key:
-        raise AppError("API Key 格式不正确，请从 DeepSeek 开放平台复制完整的 Key（通常以 sk- 开头）。")
-    secrets_store.set_secret(secrets_store.DEEPSEEK, key)
-    db.cache_set("deepseek_last_test", None)
+        hint = ("从 DeepSeek 开放平台复制完整的 Key（通常以 sk- 开头）" if provider == "deepseek"
+                else "从 Google AI Studio 复制完整的 Key（通常以 AIza 开头）")
+        raise AppError(f"API Key 格式不正确，请{hint}。")
+    secrets_store.set_secret(PROVIDERS[provider]["secret"], key)
+    db.cache_set(f"{provider}_last_test", None)
     return _ai_config()
 
 
 @router.delete("/ai/key")
-def delete_key():
-    secrets_store.delete_secret(secrets_store.DEEPSEEK)
-    db.cache_set("deepseek_last_test", None)
+def delete_key(provider: str | None = None):
+    provider = _provider(provider)
+    secrets_store.delete_secret(PROVIDERS[provider]["secret"])
+    db.cache_set(f"{provider}_last_test", None)
     return _ai_config()
 
 
 class TestIn(BaseModel):
     api_key: str | None = None  # test a key before saving it
     chat: bool = True
+    provider: str | None = None
 
 
 @router.post("/ai/test")
 def test_ai(body: TestIn):
-    """Explicit connection test: auth + balance + a tiny chat completion with the chosen model."""
-    s = settings_store.get_settings()["ai"]
-    key = (body.api_key or "").strip() or secrets_store.get_secret(secrets_store.DEEPSEEK)
+    """Explicit connection test: auth (+ balance for DeepSeek) + a tiny call with the chosen model."""
+    provider = _provider(body.provider)
+    label = PROVIDERS[provider]["label"]
+    key = (body.api_key or "").strip() or secrets_store.get_secret(PROVIDERS[provider]["secret"])
     if not key:
         raise AppError("请先填写 API Key", code="not_configured")
-    client = DeepSeekClient(key, s["base_url"], s["model"], timeout=60)
-    result: dict[str, Any] = {"ok": False, "steps": [], "at": db.now_iso()}
+    client = ai_client.make_client(provider, key, timeout=60)
+    model = client.model
+    result: dict[str, Any] = {"ok": False, "steps": [], "at": db.now_iso(), "provider": provider}
     try:
         t0 = time.monotonic()
         try:
             models = client.list_models()
-            db.cache_set("deepseek_models", models)
+            db.cache_set(f"{provider}_models", models)
             result["models"] = models
-            result["steps"].append({"name": "身份验证", "ok": True, "detail": f"可用模型：{', '.join(models) or '未返回'}"})
+            shown = models if len(models) <= 8 else models[:8] + [f"等 {len(models)} 个"]
+            result["steps"].append({"name": "身份验证", "ok": True, "detail": f"可用模型：{', '.join(shown) or '未返回'}"})
         except AIError as e:
             result["steps"].append({"name": "身份验证", "ok": False, "detail": e.message})
             result["error"] = e.message
             result["error_code"] = e.code
-            return _finish_test(result, body)
-        try:
-            bal = client.balance()
-            if bal is not None:
-                infos = bal.get("balance_infos") or []
-                text = "，".join(f"{b.get('total_balance')} {b.get('currency')}" for b in infos) or "未知"
-                result["balance"] = {"available": bal.get("is_available"), "infos": infos}
-                result["steps"].append({"name": "账户余额", "ok": bool(bal.get("is_available")),
-                                        "detail": f"余额 {text}" + ("" if bal.get("is_available") else "（余额不足，无法调用）")})
-        except AIError as e:
-            result["steps"].append({"name": "账户余额", "ok": False, "detail": e.message})
+            return _finish_test(result, body, provider)
+        if provider == "deepseek":
+            try:
+                bal = client.balance()
+                if bal is not None:
+                    infos = bal.get("balance_infos") or []
+                    text = "，".join(f"{b.get('total_balance')} {b.get('currency')}" for b in infos) or "未知"
+                    result["balance"] = {"available": bal.get("is_available"), "infos": infos}
+                    result["steps"].append({"name": "账户余额", "ok": bool(bal.get("is_available")),
+                                            "detail": f"余额 {text}" + ("" if bal.get("is_available") else "（余额不足，无法调用）")})
+            except AIError as e:
+                result["steps"].append({"name": "账户余额", "ok": False, "detail": e.message})
         if body.chat:
             try:
                 res = client.chat([{"role": "user", "content": "Reply with the single word: OK"}], thinking=False,
                                   max_tokens=8, kind="connection_test", retries=1)
-                result["steps"].append({"name": f"模型调用（{s['model']}）", "ok": True,
+                result["steps"].append({"name": f"模型调用（{model}）", "ok": True,
                                         "detail": f"响应正常，用时 {time.monotonic() - t0:.1f} 秒"})
                 result["model_used"] = res.model
             except AIError as e:
-                result["steps"].append({"name": f"模型调用（{s['model']}）", "ok": False, "detail": e.message})
+                result["steps"].append({"name": f"模型调用（{model}）", "ok": False, "detail": e.message})
                 result["error"] = e.message
                 result["error_code"] = e.code
-                return _finish_test(result, body)
+                return _finish_test(result, body, provider)
         result["ok"] = all(st["ok"] for st in result["steps"])
         if not result["ok"] and not result.get("error"):
             result["error"] = next(st["detail"] for st in result["steps"] if not st["ok"])
-        return _finish_test(result, body)
+        if result["ok"]:
+            result["message"] = f"{label} API 可以正常使用"
+        return _finish_test(result, body, provider)
     finally:
         client.close()
 
 
-def _finish_test(result: dict[str, Any], body: TestIn) -> dict[str, Any]:
+def _finish_test(result: dict[str, Any], body: TestIn, provider: str) -> dict[str, Any]:
     if not body.api_key:  # only remember results for the saved key
-        db.cache_set("deepseek_last_test", {k: result.get(k) for k in ("ok", "at", "error", "steps")})
+        db.cache_set(f"{provider}_last_test", {k: result.get(k) for k in ("ok", "at", "error", "steps")})
     return result
 
 
+_PROXY_RE = re.compile(r"^(https?|socks5h?)://[^\s/]+(:\d+)?/?$", re.I)
+
+
 class AIPrefs(BaseModel):
+    provider: str | None = None
     base_url: str | None = None
     model: str | None = None
     thinking_for_analysis: bool | None = None
+    gemini_model: str | None = None
+    gemini_base_url: str | None = None
+    gemini_proxy: str | None = None
+    gemini_free_tier: bool | None = None
 
 
 @router.patch("/ai/config")
 def patch_ai(body: AIPrefs):
-    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    if body.provider is not None:
+        _provider(body.provider)
+    fields = body.model_dump()
+    patch: dict[str, Any] = {k: v for k, v in fields.items() if v is not None and not k.startswith("gemini_")}
+    gemini: dict[str, Any] = {k.removeprefix("gemini_"): v for k, v in fields.items()
+                              if v is not None and k.startswith("gemini_")}
+    if "proxy" in gemini:
+        gemini["proxy"] = gemini["proxy"].strip()
+        if gemini["proxy"] and not _PROXY_RE.match(gemini["proxy"]):
+            raise AppError("代理地址格式不正确。请填写类似 http://127.0.0.1:7890 的地址（支持 http、https、socks5）。")
+    if "base_url" in gemini and gemini["base_url"].strip() and not re.match(r"^https?://", gemini["base_url"].strip()):
+        raise AppError("服务地址需要以 https:// 开头。")
+    if gemini:
+        patch["gemini"] = gemini
     if patch:
         settings_store.update_settings({"ai": patch})
     return _ai_config()

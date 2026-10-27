@@ -27,12 +27,12 @@ from ..fulltext import fetcher
 from ..fulltext.model import units as doc_units
 from ..jobs import Job, JobCancelled
 from . import prompts
-from .client import AIError, DeepSeekClient, get_client
+from .client import AIError, BaseClient, get_client
 
 log = logging.getLogger(__name__)
 
 CHUNK_CHARS = 4500
-FATAL_CODES = {"auth", "balance", "not_configured", "endpoint", "model"}
+FATAL_CODES = {"auth", "balance", "not_configured", "endpoint", "model", "region", "quota_daily", "proxy"}
 _INLINE_MATH = re.compile(r"(?<!\\)\$\$(.+?)(?<!\\)\$\$|(?<!\\)\$(.+?)(?<!\\)\$", re.S)
 _PLACEHOLDER = re.compile(r"⟦M(\d+)⟧")
 
@@ -87,7 +87,7 @@ def collect_units(doc: dict[str, Any], include_appendix: bool) -> list[Unit]:
 MAX_UNITS_PER_CHUNK = 40
 
 
-def chunk_units(units: list[Unit], max_chars: int = CHUNK_CHARS) -> list[list[Unit]]:
+def chunk_units(units: list[Unit], max_chars: int = CHUNK_CHARS, max_units: int = MAX_UNITS_PER_CHUNK) -> list[list[Unit]]:
     """Group consecutive units into requests of ~max_chars. Small neighbouring sections share a
     request (fewer calls, less repeated prompt overhead); a new section starts a new chunk only
     when the current one is already more than half full, so section context stays coherent."""
@@ -96,7 +96,7 @@ def chunk_units(units: list[Unit], max_chars: int = CHUNK_CHARS) -> list[list[Un
     size = 0
     for u in units:
         new_section = bool(cur) and u.section_id != cur[-1].section_id
-        if cur and (size + len(u.text) > max_chars or len(cur) >= MAX_UNITS_PER_CHUNK
+        if cur and (size + len(u.text) > max_chars or len(cur) >= max_units
                     or (new_section and size > max_chars * 0.5)):
             chunks.append(cur)
             cur, size = [], 0
@@ -129,7 +129,7 @@ def _section_path(doc: dict[str, Any]) -> dict[str, str]:
     return path
 
 
-def ensure_glossary(client: DeepSeekClient, paper: dict[str, Any], doc: dict[str, Any]) -> list[dict[str, Any]]:
+def ensure_glossary(client: BaseClient, paper: dict[str, Any], doc: dict[str, Any]) -> list[dict[str, Any]]:
     existing = get_glossary(paper["id"])
     if existing:
         return existing
@@ -163,7 +163,7 @@ def _glossary_text(terms: list[dict[str, Any]]) -> str:
     return "\n".join(f"- {t['en']} → {t['zh']}" + ("（保留英文）" if t.get("keep") else "") for t in terms[:60])
 
 
-def translate_chunk(client: DeepSeekClient, paper: dict[str, Any], chunk: list[Unit], context: str, section_path: str,
+def translate_chunk(client: BaseClient, paper: dict[str, Any], chunk: list[Unit], context: str, section_path: str,
                     glossary: str, system: str) -> dict[str, tuple[str, list[str]]]:
     """Translate one chunk. Returns {unit_id: (text, flags)}. Retries once for missing ids/placeholders."""
     masked = {u.id: mask_math(u.text) for u in chunk}
@@ -171,7 +171,7 @@ def translate_chunk(client: DeepSeekClient, paper: dict[str, Any], chunk: list[U
     results: dict[str, tuple[str, list[str]]] = {}
     for attempt in range(2):
         items = [{"id": u.id, "kind": u.kind, "text": masked[u.id][0]} for u in pending]
-        # Constant per-paper prefix first (title + glossary) so DeepSeek's prompt cache can hit.
+        # Constant per-paper prefix first (title + glossary) so the provider's prompt cache can hit.
         user = (f"论文标题：{paper['title']}\n\n术语表（英文 → 中文）：\n{glossary}\n\n当前章节：{section_path}\n\n"
                 + (f"上文（仅供理解语境，不要翻译）：{context}\n\n" if context else "")
                 + "待翻译内容：\n" + db.dumps({"items": items}))
@@ -215,6 +215,7 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
     if not paper:
         raise AppError("论文不存在", status_code=404)
     client = get_client()
+    client.on_wait = lambda s: job.update(message=f"{client.label} 请求频率受限，等待 {int(s + 0.5)} 秒后继续…", force=True)
     try:
         job.update(message="正在准备全文…", force=True)
         doc = fetcher.ensure(paper, job)
@@ -252,7 +253,7 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
         # previous unit text (original) as read-only context for each chunk
         index = {u.id: i for i, u in enumerate(collect_units(doc, True))}
         flat = collect_units(doc, True)
-        chunks = chunk_units(todo)
+        chunks = chunk_units(todo, client.chunk_chars, client.chunk_units)
         failed: list[str] = []
         errors: list[str] = []
         fatal: list[AIError] = []
@@ -285,7 +286,8 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
                         failed.append(u.id)
             job.advance(len(chunk))
 
-        with ThreadPoolExecutor(max_workers=settings["ai"]["concurrency"]) as ex:
+        workers = min(settings["ai"]["concurrency"], client.max_concurrency or 99)
+        with ThreadPoolExecutor(max_workers=workers) as ex:
             futures = [ex.submit(work, c) for c in chunks]
             for f in as_completed(futures):
                 f.result()

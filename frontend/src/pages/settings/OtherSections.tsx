@@ -191,7 +191,7 @@ export function RecommendSection() {
       <Card className="divide-y divide-border p-5">
         <Row
           title={<span className="flex items-center gap-2">AI 精排 <Badge tone="warning">消耗 API</Badge></span>}
-          desc="开启后，每次获取推荐时会把候选论文交给 DeepSeek 重新评估相关度，并生成中文标题与一句话概述。每次约 1-2 万 tokens（使用 Flash 模型约几分钱）。打开应用时的自动获取不会使用 AI 精排。"
+          desc="开启后，每次获取推荐时会把候选论文交给 AI（DeepSeek 或 Gemini）重新评估相关度，并生成中文标题与一句话概述。每次约 1-2 万 tokens（DeepSeek Flash 约几分钱；Gemini 免费档计 1 次请求）。打开应用时的自动获取不会使用 AI 精排。"
         >
           <Switch checked={s.ai_rerank} onChange={(v) => set({ ai_rerank: v })} label="AI 精排" />
         </Row>

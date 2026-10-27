@@ -60,7 +60,7 @@ function AiStatus() {
       <span className={cn("size-2 shrink-0 rounded-full", ok ? "bg-success" : data.configured ? "bg-danger" : "bg-warning")} />
       <span className="min-w-0 flex-1 leading-tight">
         <span className="block truncate text-[13px] font-medium text-text">
-          {data.configured ? (ok ? "DeepSeek 已就绪" : "DeepSeek 连接异常") : "AI 功能未配置"}
+          {data.configured ? (ok ? `${data.label} 已就绪` : `${data.label} 连接异常`) : "AI 功能未配置"}
         </span>
         <span className="block truncate text-[11px] text-text-3">{data.configured ? data.model : "点击填写 API Key"}</span>
       </span>

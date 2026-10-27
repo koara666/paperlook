@@ -85,7 +85,7 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 2. 启动应用（临时数据目录）确认当前可用；跑 `pytest`。
 3. 选定任务 → 小步实现 → 测试 → 浏览器验证 → 更新文档。
 4. 真实 DeepSeek（deepseek-flash）已于 2026-10-27 验证通过。用户的 Key 在系统凭据管理器中：用临时数据目录启动测试实例（不设 `PAPERLOOK_DISABLE_KEYRING`）即可复用该 Key 做真实验证，但会消耗用户余额，只在必要时少量使用；日常开发用模拟服务。
-5. 项目准备发布到 GitHub：提交前确认 `data/`、`.venv/`、密钥不在提交中（`.gitignore` 已覆盖）；改了 `start.bat` 等脚本要保持 CRLF（`.gitattributes` 已约束）。
+5. 仓库已发布在 <https://github.com/koara666/paperlook>（作者身份 koara666 <luoyu6867@gmail.com>）。提交前确认 `data/`、`.venv/`、密钥不在提交中（`.gitignore` 已覆盖）；改了 `start.bat` 等脚本要保持 CRLF（`.gitattributes` 已约束）。推送失败提示连不上 `127.0.0.1:7897` 时，是全局 git 代理没在运行，可用 `git -c http.proxy= -c https.proxy= push` 直连。
 
 ## 8. 「完整可用」的判定清单
 

@@ -1,6 +1,6 @@
 # 项目状态
 
-- **当前阶段**：第一阶段（v1.0）完成，可日常使用；准备发布到 GitHub。
+- **当前阶段**：第一阶段（v1.0）完成，可日常使用；已发布到 GitHub：<https://github.com/koara666/paperlook>（MIT）。
 - **最近更新**：2026-10-27（真实 DeepSeek 全流程验证、提示词缓存优化、GitHub 发布准备）
 - **运行状态**：`start.bat` 启动正常；Windows 11 + Python 3.14 + Edge 已实测。
 

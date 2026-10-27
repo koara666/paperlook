@@ -10,6 +10,9 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 
 ## [未发布]
 
+### 开发
+- GitHub Actions 组件升级到 Node.js 24 版本（checkout / setup-python / setup-node / upload-artifact v7、action-gh-release v3），消除 Node.js 20 弃用警告。
+
 ## [1.1.0] - 2026-10-28
 
 ### 新增

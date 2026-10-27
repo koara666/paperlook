@@ -12,6 +12,7 @@
 - **桌面应用**：`desktop.py`（pywebview 窗口、单实例、关闭即退出）；PyInstaller + Inno Setup；安装版数据在 `%LOCALAPPDATA%\PaperLook`。
 - **CI 发现并修复的问题**：① 源码版最低 Python 实际是 3.11（PyMuPDF 2.0 / onnxruntime 要求），之前允许 3.10 会安装失败；② 最新的 Python 3.15 没有 onnxruntime 安装包，`start.bat`/`start.sh` 改为优先选择 3.14 → 3.11，只有 3.15 时给出明确提示；③ PyInstaller 在 setuptools 可用的环境中与 `distutils` 排除项冲突，改为排除 cffi 的构建期模块。
 - **CI 结果**：Windows（3.14、3.13）、Ubuntu（3.11）、macOS（3.13）测试，前端构建产物一致性，三平台启动脚本冒烟测试全部通过；Release 工作流在 CI 上完成打包、exe 冒烟测试、免安装 zip 与 Inno Setup 安装包。
+- **v1.1.0 已发布**：<https://github.com/koara666/paperlook/releases/tag/v1.1.0>（2026-10-28 01:08 北京时间），含 `PaperLook-1.1.0-Windows-Setup.exe`（53 MB）与 `PaperLook-1.1.0-Windows-Portable.zip`（73 MB）；Release 工作流的测试、打包、exe 冒烟测试、发布全部成功，安装包使用简体中文界面。之后把 GitHub Actions 组件升级到 Node.js 24 版本（消除弃用警告）。
 - **Gemini 免费额度调查**（2026-10）：Google 不再公开固定数值，以 AI Studio 额度页为准；公开资料显示 Flash-Lite 约 10 次/分钟、500 次/天，Flash 约 5 次/分钟、20 次/天，每天太平洋时间 0 点（北京时间 15/16 点）重置；中国大陆与香港不在支持地区；免费档内容可能被用于改进产品。按本项目实测用量（1.3 万词论文全文翻译 10 次请求、每项分析 1 次），Flash-Lite 每天可完整处理二三十篇，Flash 只够一两篇。
 
 ### 2026-10-27 更新
@@ -72,16 +73,16 @@
 ## 已知问题与限制
 1. ~~真实 DeepSeek 成功调用未实测~~ → 已于 2026-10-27 用真实 Key 验证通过（见测试表）。目前只验证了 `deepseek-flash`；`deepseek-v4-pro` 与「深度思考」模式在真实 API 上尚未单独测试（参数格式与 flash 相同）。
 2. macOS / Linux 的 `start.sh` 未在真机上测试（CI 的 Ubuntu / macOS 环境会自动启动测试）。
-9. Gemini 只用模拟服务做过完整验证（开发机没有 Gemini Key、且需要代理）；真实接口的思考级别、JSON 模式、配额错误格式按 2026-10 官方文档实现，并有自动降级。首次真实使用时建议先点「测试连接」。
-10. 安装包没有代码签名，首次运行会出现 SmartScreen 提示；首次启动因安全扫描约 20 秒，之后约 4 秒。
-11. Inno Setup 安装包只在 GitHub Actions 中构建（本机未安装 Inno Setup）；PyInstaller 打包与 exe 冒烟测试在本机和 CI 都会运行。
-12. 安装版与源码版数据目录不同，不会自动迁移（用备份导出/导入；Key 共用）。
-3. Semantic Scholar 匿名访问基本都会 429（已在 UI 提示需填 Key）；有 Key 时的成功路径未实测。
-4. OpenAlex 无 Key 时与同 IP 用户共享每日 $0.1 额度（约 100 次检索），超额时该来源失败但不影响其他来源。
-5. PDF 解析（PyMuPDF4LLM 版面分析模式）较慢：20 页约 30 秒；公式无法还原为 LaTeX（以原文本显示并标注、不翻译）；图片不显示。arXiv HTML 来源无这些问题。
-6. arXiv 周末/节假日不发布新论文，「最近 1 天」常为空（UI 会提示扩大范围）。
-7. 期刊/会议质量依据来自内置列表（`recommend/venues.py`）与 OpenAlex 统计，覆盖以 CS 为主；其他领域主要依赖 OpenAlex 统计。
-8. 前端 JS 包约 740 KB（含 KaTeX），本地加载无感，未做代码分割。
+3. Gemini 只用模拟服务做过完整验证（开发机没有 Gemini Key、且需要代理）；真实接口的思考级别、JSON 模式、配额错误格式按 2026-10 官方文档实现，并有自动降级。首次真实使用时建议先点「测试连接」。
+4. 安装包没有代码签名，首次运行会出现 SmartScreen 提示；首次启动因安全扫描约 20 秒，之后约 4 秒。
+5. Inno Setup 安装包只在 GitHub Actions 中构建（本机未安装 Inno Setup）；PyInstaller 打包与 exe 冒烟测试在本机和 CI 都会运行。
+6. 安装版与源码版数据目录不同，不会自动迁移（用备份导出/导入；Key 共用）。
+7. Semantic Scholar 匿名访问基本都会 429（已在 UI 提示需填 Key）；有 Key 时的成功路径未实测。
+8. OpenAlex 无 Key 时与同 IP 用户共享每日 $0.1 额度（约 100 次检索），超额时该来源失败但不影响其他来源。
+9. PDF 解析（PyMuPDF4LLM 版面分析模式）较慢：20 页约 30 秒；公式无法还原为 LaTeX（以原文本显示并标注、不翻译）；图片不显示。arXiv HTML 来源无这些问题。
+10. arXiv 周末/节假日不发布新论文，「最近 1 天」常为空（UI 会提示扩大范围）。
+11. 期刊/会议质量依据来自内置列表（`recommend/venues.py`）与 OpenAlex 统计，覆盖以 CS 为主；其他领域主要依赖 OpenAlex 统计。
+12. 前端 JS 包约 740 KB（含 KaTeX），本地加载无感，未做代码分割。
 
 ## 最近一次测试结果（2026-10-28，v1.1.0）
 

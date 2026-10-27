@@ -39,6 +39,7 @@ def status():
         "ai_configured": is_configured(),
         "secret_backend": secrets_store.backend_name(),
         "python": platform.python_version(),
+        "packaged": config.FROZEN,
         "uptime_seconds": int(time.time() - STARTED),
         "active_jobs": len(manager.active()),
     }

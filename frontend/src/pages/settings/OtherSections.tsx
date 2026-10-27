@@ -535,8 +535,8 @@ export function DataSection() {
                 PaperLook {st.version}
                 <UpdateCheck />
               </span>
-              <span className="text-text-3">Python</span>
-              <span className="text-text">{st.python}</span>
+              <span className="text-text-3">运行方式</span>
+              <span className="text-text">{st.packaged ? "桌面应用（安装版）" : "源码版"} · Python {st.python}</span>
               <span className="text-text-3">密钥存储</span>
               <span className="text-text">{st.secret_backend}</span>
               <span className="text-text-3">运行时长</span>

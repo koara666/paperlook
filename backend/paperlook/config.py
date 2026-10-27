@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 from . import __version__
@@ -13,8 +14,25 @@ PACKAGE_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = PACKAGE_DIR.parent
 PROJECT_DIR = BACKEND_DIR.parent
 
-# All user data (database, logs, caches) lives here. Never committed (see .gitignore).
-DATA_DIR = Path(os.environ.get("PAPERLOOK_DATA_DIR", PROJECT_DIR / "data")).resolve()
+# True in the packaged desktop app (PyInstaller).
+FROZEN = bool(getattr(sys, "frozen", False))
+
+
+def _default_data_dir() -> Path:
+    if not FROZEN:
+        return PROJECT_DIR / "data"  # running from source: next to the code (never committed)
+    # Installed app: the per-user data folder, kept when the app is upgraded or uninstalled.
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / APP_NAME
+
+
+# All user data (database, logs, caches) lives here.
+DATA_DIR = Path(os.environ.get("PAPERLOOK_DATA_DIR") or _default_data_dir()).resolve()
 STATIC_DIR = PACKAGE_DIR / "static"
 
 DEFAULT_HOST = "127.0.0.1"

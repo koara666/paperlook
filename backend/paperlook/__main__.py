@@ -1,6 +1,7 @@
-"""Start PaperLook:  python -m paperlook [--port 8765] [--no-browser]
+"""Start PaperLook:  python -m paperlook [--port 8765] [--no-browser] [--window]
 
 If an instance is already running on the port, just opens the browser.
+--window shows the app in its own window instead of a browser tab (see desktop.py).
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="paperlook")
     parser.add_argument("--port", type=int, default=config.DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--window", action="store_true", help="open in a desktop window (needs pywebview)")
     args = parser.parse_args()
 
     # Make console output safe on Windows terminals that are not UTF-8.
@@ -45,6 +47,12 @@ def main() -> None:
             stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[attr-defined]
         except Exception:
             pass
+
+    if args.window:
+        from .desktop import main as desktop_main
+
+        desktop_main(args.port)
+        return
 
     port = args.port
     if _running_instance(port):

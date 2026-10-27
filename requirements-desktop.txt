@@ -1,0 +1,4 @@
+# Building the Windows desktop app (packaging/build_windows.ps1); not needed to run from source.
+-r requirements.txt
+pywebview>=6.0
+pyinstaller>=6.10

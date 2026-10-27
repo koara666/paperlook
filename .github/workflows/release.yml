@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag like v1.1.0 (matching backend/paperlook/__init__.py) to build the Windows app and
+# publish a GitHub Release. Running it by hand only builds and uploads the files as an artifact.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows 桌面应用
+    runs-on: windows-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-desktop.txt
+
+      - name: 检查标签与代码版本号一致
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          v=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' backend/paperlook/__init__.py)
+          if [ "v$v" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::标签 $GITHUB_REF_NAME 与代码中的版本号 $v 不一致"
+            exit 1
+          fi
+          python scripts/release_notes.py "$v" > "$RUNNER_TEMP/notes.md"
+
+      - name: 安装依赖
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-desktop.txt pytest
+
+      - name: 测试
+        env:
+          PAPERLOOK_DISABLE_KEYRING: "1"
+        run: python -m pytest backend/tests -q
+
+      - name: 安装 Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: 打包（PyInstaller + 冒烟测试 + 安装包）
+        run: ./packaging/build_windows.ps1 -SmokeTest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PaperLook-windows
+          path: |
+            dist/PaperLook-*-Windows-Setup.exe
+            dist/PaperLook-*-Windows-Portable.zip
+          if-no-files-found: error
+
+      - name: 发布 GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PaperLook ${{ github.ref_name }}
+          body_path: ${{ runner.temp }}/notes.md
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: |
+            dist/PaperLook-*-Windows-Setup.exe
+            dist/PaperLook-*-Windows-Portable.zip

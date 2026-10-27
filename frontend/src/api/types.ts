@@ -396,6 +396,7 @@ export interface SystemStatus {
   ai_configured: boolean;
   secret_backend: string;
   python: string;
+  packaged: boolean;
   uptime_seconds: number;
   active_jobs: number;
 }

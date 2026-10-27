@@ -6,6 +6,10 @@ data/
 secrets.bin
 *.log
 
+# --- build output (packaging/build_windows.ps1) ---
+dist/
+build/
+
 # --- environments ---
 .venv/
 venv/

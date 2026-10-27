@@ -75,7 +75,8 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 - 规则（见 `CHANGELOG.md` 开头）：数据不兼容或删除功能 → 主版本；新功能 → 次版本；只修问题 → 修订号。
 - 平时把改动记到 `CHANGELOG.md` 的「未发布」下面；发布时把它改成 `## [X.Y.Z] - 日期`，更新文件末尾的比较链接，改版本号，提交并推送 main，等 CI 通过后 `git tag -a vX.Y.Z -m "PaperLook X.Y.Z" && git push origin vX.Y.Z`。`release.yml` 会校验标签与版本号一致、跑测试、打包、冒烟测试、发布 Release（说明取自 CHANGELOG + 安装说明）。
 - 已发布的标签不要移动或删除；发布出错就修复后发下一个修订号。
-- 没有 `gh` 命令时，用 `curl -s https://api.github.com/repos/koara666/paperlook/actions/runs?per_page=5` 查看 CI 结果（公开仓库无需登录）。
+- 没有 `gh` 命令时，用 `curl -s https://api.github.com/repos/koara666/paperlook/actions/runs?per_page=5` 查看 CI 结果（公开仓库无需登录）。作业日志需要登录才能下载，所以失败的步骤会用 `scripts/ci_annotate.py` 把日志末尾和错误行写成注释：先取 `runs/<run id>/jobs` 中失败作业的 `check_run_url`，再读 `<check_run_url>/annotations` 即可看到原因。打包时安装包使用的语言文件也会以 notice 注释输出。
+- CI 的 Windows 机器装的是 Inno Setup 6（简体中文不是官方语言），所以 `packaging/ChineseSimplified.isl` 随仓库提供；Inno Setup 7 自带的官方文件优先。
 
 ## 7. 如何避免重复实现
 

@@ -10,6 +10,26 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 
 ## [未发布]
 
+## [1.1.0] - 2026-10-28
+
+### 新增
+- **Windows 桌面应用**：安装包 `PaperLook-1.1.0-Windows-Setup.exe`（不需要管理员权限，也不需要安装 Python）和免安装压缩包。界面在独立窗口中运行，关闭窗口即退出；重复打开会切换到已打开的窗口；导出和备份会弹出「另存为」对话框。安装版数据保存在 `%LOCALAPPDATA%\PaperLook`，升级、卸载都会保留。
+- **Google Gemini**：可以在「设置 → AI 服务」改用 Gemini（AI Studio 的免费 Key 每天有一定请求额度）。两个服务的 Key 分开保存，随时切换。
+  - 「免费档模式」：按模型自动限速，并把全文翻译合并成更少、更大的请求（一篇 1.3 万词的论文约 10 次请求）。
+  - 显示今天已用的请求次数（按 Google 的重置时间，北京时间 15:00 / 冬令时 16:00 起算）。
+  - 可填写代理地址；地区不支持、当天额度用完、Key 无效、模型不可用等情况都有中文说明和解决办法；额度用完时已完成的翻译会保留，之后可以继续。
+- 「设置 → 数据与系统 → 关于」：检查更新（只在点击时访问 GitHub），显示是安装版还是源码版。
+- 源码版可以用 `python -m paperlook --window` 在独立窗口中运行（需要 `pip install pywebview`）。
+
+### 变更
+- 界面中写死的「DeepSeek」改为当前使用的 AI 服务名称。
+- 新增依赖 `httpx[socks]`（Gemini 代理支持 socks5）；源码版下次启动时会自动安装。
+
+### 开发
+- 版本号遵循语义化版本，`CHANGELOG.md` 记录每个版本；测试会检查各处版本号一致。
+- GitHub Actions：每次提交在 Windows / Linux / macOS 上运行测试、检查前端构建产物与源码一致、用 `start.bat` / `start.sh` 在全新环境中启动冒烟测试；推送 `v*` 标签自动打包、冒烟测试并发布 Release。
+- 模拟服务 `backend/tests/mock_deepseek.py` 同时模拟 Gemini（含各种错误）；测试从 34 个增加到 55 个。
+
 ## [1.0.0] - 2026-10-27
 
 首个正式版本。
@@ -22,5 +42,6 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 - 论文库、收藏/已读/隐藏、备份导出与导入、深色模式、手机宽度适配。
 - `start.bat` 一键启动（自动创建环境、国内镜像兜底）。
 
-[未发布]: https://github.com/koara666/paperlook/compare/v1.0.0...HEAD
+[未发布]: https://github.com/koara666/paperlook/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/koara666/paperlook/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/koara666/paperlook/releases/tag/v1.0.0

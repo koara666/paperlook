@@ -3,7 +3,7 @@
 ## 1. 总体结构
 
 ```
-┌───────────────────────── 浏览器 (http://127.0.0.1:8765) ─────────────────────────┐
+┌──────── 桌面窗口 (pywebview/WebView2) 或 浏览器 (http://127.0.0.1:8765) ─────────┐
 │ React + TS + Tailwind（frontend/，构建产物在 backend/paperlook/static/）          │
 │  今日推荐 · 论文库 · 论文详情（概览/全文·翻译/总结/模块/创新点）· 设置            │
 │  React Query 轮询后台任务状态（job），不直接接触任何密钥                          │
@@ -17,23 +17,27 @@
 │  recommend/  engine → sources/* → dedupe → 时间过滤 → 去已推荐 → 信号增强          │
 │              → relevance / quality / freshness → ranker(配额选择) → 持久化         │
 │  fulltext/   fetcher → arxiv_html（LaTeXML 解析）| pdf（PyMuPDF4LLM）→ 统一文档模型 │
-│  ai/         client(DeepSeek) · prompts · translate · analyze · rerank            │
+│  ai/         client(DeepSeek | Gemini) · prompts · translate · analyze · rerank   │
 │  settings_store · directions · papers(仓储) · secrets_store · export · db(SQLite)  │
 └───────────────┬─────────────────────────────┬─────────────────────────────────────┘
                 │                             │
-     arXiv / OpenAlex / S2 / PubMed      DeepSeek API（仅在用户点击后调用）
-     / Hugging Face Daily Papers          https://api.deepseek.com
+     arXiv / OpenAlex / S2 / PubMed      DeepSeek 或 Gemini API（仅在用户点击后调用）
+     / Hugging Face Daily Papers          api.deepseek.com / generativelanguage.googleapis.com
 ```
 
-单进程、单机、单用户。`python -m paperlook`（由 start.bat/start.sh 调用）启动 uvicorn，并在就绪后打开浏览器。
+单进程、单机、单用户。两种运行方式共用同一套代码：
+
+- **源码版**：`python -m paperlook`（由 start.bat/start.sh 调用）启动 uvicorn，并在就绪后打开浏览器；数据在项目目录 `data/`。
+- **桌面应用**（`desktop.py`，PyInstaller 打包为 `PaperLook.exe`）：后台线程运行 uvicorn，主线程用 pywebview 打开系统 WebView2 窗口；关闭窗口即停止服务。再次启动时若发现同一数据目录的实例在运行，就把它的窗口切到前台（`FindWindowW`）后退出；没有 WebView2 时退回浏览器 + 消息框。数据在 `%LOCALAPPDATA%\PaperLook`（`config.FROZEN` 时）。
 
 ## 2. 目录与模块
 
 | 路径 | 职责 |
 | --- | --- |
-| `backend/paperlook/__main__.py` | 启动入口：端口探测、已运行实例检测、打开浏览器 |
+| `backend/paperlook/__main__.py` | 启动入口：端口探测、已运行实例检测、打开浏览器；`--window` 转到桌面模式 |
+| `desktop.py` | 桌面模式：pywebview 窗口、单实例、窗口关闭即退出、下载走「另存为」对话框 |
 | `main.py` | FastAPI 工厂、本地访问安全中间件、错误处理、SPA 静态文件 |
-| `config.py` | 路径常量（`DATA_DIR` 可用环境变量 `PAPERLOOK_DATA_DIR` 覆盖） |
+| `config.py` | 路径常量（`DATA_DIR`：源码版 `data/`，安装版 `%LOCALAPPDATA%\PaperLook`，可用 `PAPERLOOK_DATA_DIR` 覆盖） |
 | `db.py` | SQLite（WAL，线程级连接）、版本化迁移 `MIGRATIONS`、kv 缓存 |
 | `settings_store.py` | 用户设置（单个 JSON 文档）、默认值、校验、排序预设 |
 | `secrets_store.py` | API Key：keyring → Windows DPAPI 加密文件 → 仅限本人可读文件 |
@@ -43,10 +47,13 @@
 | `sources/` | `base.py`（RawPaper、HTTP 重试、限速）+ arxiv / openalex / semantic_scholar / pubmed / hf_daily；注册表在 `sources/__init__.py` |
 | `recommend/` | `engine`（流程编排）、`dedupe`、`relevance`、`quality`、`venues`（顶会/期刊表）、`freshness`、`ranker` |
 | `fulltext/` | `model`（文档结构与可翻译单元）、`arxiv_html`、`pdf`、`fetcher`（来源选择与缓存） |
-| `ai/` | `client`（DeepSeek 调用、错误映射、用量记录）、`prompts`、`translate`、`analyze`、`rerank` |
+| `ai/` | `client`（`BaseClient` → `DeepSeekClient` / `GeminiClient`：重试、错误映射、限速、用量记录）、`prompts`、`translate`、`analyze`、`rerank` |
 | `export.py` | 译文/AI 分析导出为 Markdown |
 | `api/` | HTTP 路由 |
-| `backend/tests/` | pytest 测试 + `mock_deepseek.py`（本地模拟 DeepSeek，用于无额度测试） |
+| `backend/tests/` | pytest 测试 + `mock_deepseek.py`（本地模拟 DeepSeek 与 Gemini，用于无额度测试） |
+| `packaging/` | `paperlook.spec`（PyInstaller）、`installer.iss`（Inno Setup，按用户安装）、`build_windows.ps1`（打包 + 冒烟测试 + zip + 安装包）、`paperlook_app.py`（exe 入口） |
+| `.github/workflows/` | `ci.yml`（测试、前端产物一致性、启动脚本冒烟测试）、`release.yml`（`v*` 标签 → 发布） |
+| `scripts/` | `ensure_deps.py`（源码版依赖安装）、`release_notes.py`（从 CHANGELOG 生成 Release 说明） |
 | `frontend/src/` | `api/`（类型、请求、hooks）、`components/`（ui、layout、papers）、`pages/`（Today、Library、Paper、Settings 及子组件）、`lib/`（KaTeX 渲染、格式化、主题） |
 
 ## 3. 数据流
@@ -75,8 +82,8 @@
 1. 文档 → 可翻译单元：章节标题、段落、段内标题、列表项、图/表/算法标题。公式、代码、表格正文、参考文献不发送。
 2. 行内公式 `$…$` 替换为 `⟦M1⟧` 占位符，返回后还原并校验，缺失则重试一次并标记。
 3. 首次翻译先生成术语表（`ai_results.kind = glossary`），每个请求都带上，保证译名一致。
-4. 单元按约 4500 字符分块（小章节会合并，最多 40 段），并发（默认 4）调用，JSON 输出 `{"translations":[{id,text}]}` 保证段落一一对应。
-5. 每块成功立即写入 `translations`；失败块记录错误，作业状态为 `partial`，「继续翻译」只翻译缺失部分。401/402/模型错误立即终止整个作业。
+4. 单元按约 4500 字符分块（小章节会合并，最多 40 段），并发（默认 4）调用，JSON 输出 `{"translations":[{id,text}]}` 保证段落一一对应。分块大小与并发上限由客户端决定（`client.chunk_chars / chunk_units / max_concurrency`）：Gemini 免费档按请求次数计额度，用 16000 字符 / 80 段、并发 2（实测 1.3 万词论文 29 次 → 9 次请求）。
+5. 每块成功立即写入 `translations`；失败块记录错误，作业状态为 `partial`，「继续翻译」只翻译缺失部分。Key 无效、余额不足、模型错误、地区不支持、当天额度用完等（`FATAL_CODES`）立即终止整个作业。
 6. 提示词顺序：固定前缀（system + 标题 + 术语表）在前、可变内容在后，以命中 DeepSeek 前缀缓存。
 
 ### 3.4 AI 分析（`POST /papers/{id}/ai/{summary|modules|contributions|abstract_translation}`）
@@ -115,7 +122,11 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 - **跨方向选择**（ranker.py）：每篇归入最匹配的方向；名额按「关注程度」权重用最大余数法分配；某方向候选不足时名额让给其他方向的高分论文；最终按总分排序。
 - **自定义权重**：归一化后相关度不低于 20%。
 
-## 6. DeepSeek 接入
+## 6. AI 服务接入
+
+`settings.ai.provider` 选择 `deepseek`（默认）或 `gemini`；`ai/client.get_client()` 返回对应客户端，翻译/分析代码只用 `chat` / `chat_json`。两者共用：重试（可重试错误退避，服务端给出 `retry_after` 时按它等待）、JSON 截断时加大输出上限重试、JSON 解析失败重试一次、`api_usage` 记账。Key 分别存为 `deepseek_api_key` / `gemini_api_key`。
+
+### 6.1 DeepSeek
 
 - OpenAI 兼容 `POST {base_url}/chat/completions`；模型默认 `deepseek-flash`（另有 `deepseek-v4-pro`，列表也从 `GET /models` 获取）。
 - 思考模式：请求体 `thinking: {type: enabled|disabled}`（DeepSeek V4 起默认开启）。翻译固定关闭；分析由设置「深度思考」控制。若兼容端点不认识该字段（400/422 含 thinking），自动去掉后重试。
@@ -123,6 +134,23 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 - 错误映射：401 Key 无效、402 余额不足、429 限流（退避重试）、400/422 参数或模型不可用、404 服务地址错误、5xx/503 服务异常（重试）、网络/超时。所有消息为中文并带解决方法，前端原样显示。
 - 连接测试：`GET /models`（鉴权）→ `GET /user/balance`（余额）→ 8 tokens 的对话调用。
 - 用量：每次调用的 prompt/completion/cache-hit tokens 记入 `api_usage`。
+
+### 6.2 Gemini（`GeminiClient`，原生 `generateContent` 接口）
+
+- `POST {base_url}/v1beta/models/{model}:generateContent`，Key 放在 `x-goog-api-key` 头；system 消息 → `systemInstruction`；JSON 模式 → `responseMimeType: application/json`；思考强度 → `thinkingConfig.thinkingLevel`（翻译 `minimal`，不支持时退到 `low`，再不行就不传；深度思考 `high`）。模型不支持系统指令 / JSON 模式 / 某个思考级别时（400），自动降级并按模型记住（`_gemini_compat`）。
+- 没用 OpenAI 兼容端点：它仍是 beta，错误信息里没有配额详情（`QuotaFailure`、`RetryInfo`），而这些是区分「每分钟限流」与「当天额度用完」的关键。
+- 模型列表：`GET /v1beta/models`，只保留支持 `generateContent` 的文字模型（排除 embedding/TTS/图像/音频等）。默认 `gemini-3.5-flash-lite`（免费额度最多）。
+- 免费档模式（`ai.gemini.free_tier`，默认开）：进程内按模型的一分钟滑动窗口限速（Flash-Lite 10 次/分、Flash 5 次/分、Gemma 15 次/分，保守估计），翻译用大块、并发 2；等待时通过 `client.on_wait` 在任务进度里提示。
+- 错误映射：`API_KEY_INVALID` → auth；`User location is not supported` → region（提示换代理节点）；429 + `quotaId` 含 `PerDay` → quota_daily（不重试，提示北京时间重置点）；`quotaValue` 为 0 → 该模型无免费额度；其他 429 → rate_limit（按 `retryDelay` 等待重试）；404 → model；`finishReason` 为 SAFETY/RECITATION 等且无输出 → blocked。网络错误提示开启代理。
+- 用量：`promptTokenCount`、`candidatesTokenCount + thoughtsTokenCount`、`cachedContentTokenCount` 记入 `api_usage`；「今日已用」按太平洋时间 0 点（无需时区库，`_us_pacific_offset` 按美国夏令时规则计算）统计成功请求数。
+- 网络：`ai.gemini.proxy`（http/https/socks5，留空则 httpx 读取系统代理）；`ai.gemini.base_url` 可改为自建中转。
+
+### 6.3 版本、CI 与发布
+
+- 版本号：`paperlook.__version__` 与 `frontend/package.json`，遵循 SemVer（含义见 `CHANGELOG.md` 开头），测试校验一致性。
+- CI（每次推送 / PR）：Windows（Python 3.14、3.13）、Ubuntu（3.10）、macOS（3.13）跑 pytest；Ubuntu 上 `npm ci && npm run build` 后要求 `backend/paperlook/static/` 无变化（`.gitattributes` 让前端源码在各平台都是 LF、构建产物按字节存储，保证构建结果一致）；三个系统都用 `start.bat` / `start.sh` 在全新环境中启动并请求 `/api/health` 与首页。
+- 发布（推送 `vX.Y.Z` 标签）：校验标签与版本号一致 → pytest → PyInstaller 打包 → 启动 exe 冒烟测试 → zip + Inno Setup 安装包 → GitHub Release（说明取自 CHANGELOG 对应小节 + 安装说明）。
+- 检查更新：`GET /api/update` 只在用户点击时请求 GitHub Releases API，只比较版本号、给出下载链接，不自动下载安装。
 
 ## 7. 安全
 
@@ -136,6 +164,10 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 | 决策 | 原因 |
 | --- | --- |
 | 本地网页应用（Python 后端 + 浏览器 UI），而非桌面框架 | 无需额外运行时；PDF/HTML 解析生态在 Python 最成熟；浏览器提供最好的排版与数学渲染；一个 start.bat 即可启动 |
+| 桌面应用 = 同一套代码 + PyInstaller + pywebview，而不是用 Rust/GPUI 等重写 | 「像一个应用」的问题（要装 Python、命令行窗口、浏览器标签页）是分发问题，打包即可解决；瓶颈在网络与 AI 接口而非 CPU；阅读器依赖浏览器级排版与 KaTeX 公式，GPUI 没有成熟的公式排版；PyMuPDF4LLM 只有 Python 版；重写约 1.3 万行没有用户可见收益 |
+| 安装版按用户安装（`%LOCALAPPDATA%\Programs`），数据单独放在 `%LOCALAPPDATA%\PaperLook` | 不需要管理员权限；升级/卸载不影响数据；与源码版共用系统凭据管理器中的 Key |
+| 不做代码签名 | 个人开源项目，证书成本高；README 与 Release 说明了 SmartScreen 的「仍要运行」 |
+| Gemini 免费档用大块翻译 + 客户端限速 | 免费额度按请求次数计算，且每分钟次数很少；大块请求让每天能处理的论文数约提高 3 倍，限速避免反复 429 |
 | 前端预构建并随代码分发 | 用户不需要安装 Node.js |
 | arXiv HTML 优先于 PDF | LaTeXML 保留章节层级、LaTeX 公式、图片、表格与参考文献，翻译质量远高于 PDF 文本 |
 | 推荐阶段默认不使用 AI | 传统算法已足够快速、可解释、零成本；AI 精排作为显式开关 |

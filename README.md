@@ -2,7 +2,9 @@
 
 **每天打开、点一下按钮，就能拿到几篇与你研究方向相关、值得读的新论文；需要时再一键全文翻译、生成总结、分析关键模块、提取创新点。**
 
-PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本地网页应用）。论文数据只来自固定的可信学术数据库；所有 AI 功能都只在你点击按钮时才会调用 DeepSeek，不会在后台偷偷消耗额度。
+PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（Windows 桌面应用，也可以从源码运行）。论文数据只来自固定的可信学术数据库；所有 AI 功能都只在你点击按钮时才会调用 AI（DeepSeek，或有免费额度的 Google Gemini），不会在后台偷偷消耗额度。
+
+[![CI](https://github.com/koara666/paperlook/actions/workflows/ci.yml/badge.svg)](https://github.com/koara666/paperlook/actions/workflows/ci.yml) · [下载最新版本](https://github.com/koara666/paperlook/releases/latest) · [更新日志](CHANGELOG.md)
 
 | 每日推荐（可解释评分） | 全文中英对照（公式保留） |
 | --- | --- |
@@ -26,12 +28,24 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 | 创新点提取 | 严格区分：作者原文声明（附原文引用并**自动核验是否真实存在**）/ 基于内容归纳 / AI 推断的潜在价值 |
 | 论文库 | 按日期查看推荐历史，收藏、已读、已分析、已隐藏筛选，全文搜索 |
 | 成本可控 | AI 功能必须点击才运行；结果自动保存，重复打开不会重复请求；显示预计 tokens 与用量统计 |
+| 两种 AI 服务 | DeepSeek（按量付费，很便宜，国内直连）或 Google Gemini（有每日免费额度，需要代理），设置里一键切换 |
 
 ---
 
-## 快速开始（Windows）
+## 安装（Windows，推荐）
 
-**需要**：Windows 10/11、Python 3.10 或更高版本、能联网。推荐与阅读不需要任何 Key；AI 翻译和分析需要你自己的 DeepSeek API Key（见下文）。
+1. 打开 [Releases 页面](https://github.com/koara666/paperlook/releases/latest)，下载 **`PaperLook-版本号-Windows-Setup.exe`**。
+2. 双击安装（不需要管理员权限，也不需要安装 Python）。安装包没有数字签名，Windows 可能提示「Windows 已保护你的电脑」：点击 **「更多信息」→「仍要运行」**。
+3. 从开始菜单或桌面图标打开 **PaperLook**，它会在自己的窗口里运行；关闭窗口即退出。
+
+- 升级：下载新版本的安装包直接安装即可，数据会保留。也可以在「设置 → 数据与系统 → 关于」点「检查更新」。
+- 不想安装：下载 `PaperLook-版本号-Windows-Portable.zip`，解压后双击 `PaperLook.exe`。
+- 第一次打开可能需要十几秒（Windows 安全中心会扫描新程序），之后几秒内即可打开。
+- 推荐与阅读不需要任何 Key；AI 翻译和分析需要 DeepSeek 或 Gemini 的 API Key（见下文）。
+
+## 从源码运行（Windows / macOS / Linux）
+
+**需要**：Python 3.10 或更高版本、能联网。
 
 1. **下载**：在 GitHub 页面点绿色的 **Code → Download ZIP**，解压到任意文件夹（路径里有中文或空格也没关系）。熟悉 git 的话也可以 `git clone https://github.com/koara666/paperlook.git`。
 2. **安装 Python**（如果还没有）：<https://www.python.org/downloads/>，安装时勾选 **“Add python.exe to PATH”**。没装 Python 时双击 `start.bat` 也会提示并打开下载页面。
@@ -44,7 +58,9 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 >
 > 每个人的数据（推荐历史、翻译、AI 结果）都只保存在自己电脑上；API Key 保存在各自系统的凭据管理器中，不会出现在项目文件里。
 >
-> macOS / Linux：在项目目录运行 `./start.sh`（使用相同的启动逻辑，但尚未在真机上测试）。
+> macOS / Linux：在项目目录运行 `./start.sh`（使用相同的启动逻辑；每次提交都会在 GitHub Actions 的 Linux / macOS 环境里自动启动测试一遍）。
+>
+> 源码版也可以用独立窗口代替浏览器：`pip install pywebview` 后运行 `python -m paperlook --window`。
 
 ---
 
@@ -52,7 +68,18 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 
 1. 打开后在「今日推荐」页面勾选你关心的研究方向（例如 多模态学习、信息检索），点击 **「保存并获取今日推荐」**。
 2. 约 10–30 秒后就能看到推荐列表。点击论文标题进入详情页。
-3. 想用 AI 翻译和分析时，先配置 DeepSeek（见下一节）。**推荐与阅读本身不需要 API Key。**
+3. 想用 AI 翻译和分析时，先配置 DeepSeek 或 Gemini（见下面两节，二选一即可）。**推荐与阅读本身不需要 API Key。**
+
+## 选哪个 AI 服务？
+
+| | DeepSeek | Google Gemini |
+| --- | --- | --- |
+| 费用 | 按量付费，很便宜（一篇论文全文翻译 + 三项分析约 0.5 元） | 免费 Key 每天有一定请求次数（见下文）；超出后第二天再用，或开通付费 |
+| 网络 | 国内直接访问 | 中国大陆、香港无法使用，需要代理到美国、日本、新加坡等地区 |
+| 速度 | 快（全文翻译约 20 秒） | 免费档自动限速，全文翻译约 1–3 分钟 |
+| 隐私 | 付费 API | 免费档的请求内容可能被 Google 用于改进产品（论文是公开的，一般无妨） |
+
+两个服务的 Key 可以都填，在「设置 → AI 服务」里随时切换；已生成的翻译和分析结果不受影响。
 
 ## 配置 DeepSeek API
 
@@ -62,6 +89,23 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 4. 模型默认 `deepseek-flash`（快、便宜，推荐）；需要更强推理可切换到 `deepseek-v4-pro`。「分析时启用深度思考」可让总结/模块/创新点更严谨，但更慢、更费 tokens。
 
 **安全**：API Key 保存在 Windows 凭据管理器（系统加密存储）中，不写入项目文件、不进日志，网页里只显示打码后的形式，备份导出也不包含 Key。
+
+## 配置 Google Gemini API（免费额度）
+
+1. 开启代理（节点选美国、日本、新加坡、台湾等；香港不支持），用 Google 账号打开 <https://aistudio.google.com/apikey>，点「Create API key」，复制以 `AIza` 开头的 Key。
+2. 在 PaperLook 的 **设置 → AI 服务** 选择 **Google Gemini**，粘贴 Key，点击 **「保存并测试」**。
+3. 网络：代理软件开启「系统代理」即可；也可以在「代理地址」中填写代理软件的本地端口（如 Clash 的 `http://127.0.0.1:7890`、Clash Verge 的 `http://127.0.0.1:7897`）。
+4. 模型推荐默认的 **`gemini-3.5-flash-lite`**：免费额度最多、速度快。`gemini-3.8-flash` 质量更好，但免费额度很少。
+
+**免费额度够不够用？** 免费额度按**请求次数**计算，每个模型分开计数，每天北京时间 15:00（冬令时 16:00）重置。Google 现在不公布固定数值，以你在 [AI Studio 额度页面](https://aistudio.google.com/rate-limit) 看到的为准；2026 年 10 月的公开资料显示：Flash-Lite 约每分钟 10 次、每天 500 次，Flash 约每分钟 5 次、每天 20 次。PaperLook 在「免费档模式」下会合并翻译请求并自动限速：
+
+| 操作 | 请求次数 |
+| --- | --- |
+| 全文翻译 | 约每 1500 词 1 次（1.3 万词的论文约 10 次，6 千词约 7 次） |
+| 总结 / 关键模块 / 创新点 / 摘要翻译 | 各 1 次 |
+| AI 精排、关键词建议、连接测试 | 各 1 次 |
+
+按上面的额度：Flash-Lite 每天可以完整处理（翻译 + 三项分析）二三十篇论文，日常使用足够；Flash 每天只够翻译一两篇或分析几篇。当天额度用完时会明确提示，已完成的部分都会保存，第二天点「继续翻译」即可。「设置 → AI 服务」会显示今天已经用了多少次。
 
 ## 日常使用
 
@@ -76,7 +120,7 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 
 | 分类 | 可以做什么 |
 | --- | --- |
-| AI 服务 | API Key、连接测试、模型、深度思考、服务地址（高级）、用量统计 |
+| AI 服务 | 选择 DeepSeek / Gemini、API Key、连接测试、模型、深度思考、Gemini 免费档模式与代理、服务地址（高级）、用量统计 |
 | 研究方向 | 添加/编辑/停用/删除方向，关键词、排除词、arXiv 分类、关注程度；AI 推荐关键词 |
 | 推荐设置 | 推荐数量、时间范围、时间偏好、排序策略（均衡/相关性优先/质量优先/最新优先/自定义权重）、AI 精排（可选，消耗少量 tokens）、打开时自动获取 |
 | 论文来源 | 启用/停用各数据库，填写可选的免费 API Key，查看上次获取情况 |
@@ -86,9 +130,10 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 
 ## 数据保存在哪里
 
-- 所有数据（论文、推荐历史、全文缓存、翻译、AI 结果、设置）保存在项目目录下的 `data/paperlook.db`（SQLite）。
-- 备份：设置 → 数据与系统 → 导出备份（JSON，不含 API Key）。
-- 删除整个 `data/` 文件夹即可恢复到初始状态（API Key 仍在系统凭据管理器中，可在设置里删除）。
+- 安装版：所有数据（论文、推荐历史、全文缓存、翻译、AI 结果、设置）保存在 `%LOCALAPPDATA%\PaperLook\paperlook.db`（SQLite），升级或卸载都不会删除。
+- 源码版：保存在项目目录下的 `data/paperlook.db`。
+- 备份：设置 → 数据与系统 → 导出备份（JSON，不含 API Key）。从源码版换到安装版：在旧版导出备份、在新版导入；API Key 在系统凭据管理器中，两个版本共用。
+- 删除数据文件夹即可恢复到初始状态（API Key 仍在系统凭据管理器中，可在设置里删除）。
 
 ## 常见问题
 
@@ -106,26 +151,39 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（本�
 
 **端口被占用？** 默认端口 8765，被占用时会自动使用下一个可用端口（启动窗口会显示实际地址）。
 
+**Gemini 提示「地区不支持」或「无法连接」？** 中国大陆、香港不能直接使用 Gemini：开启代理软件的系统代理，或在「设置 → AI 服务 → 代理地址」填写本地代理端口，并把节点切换到美国、日本、新加坡等地区。
+
+**Gemini 提示「今天的免费额度已用完」？** 等到北京时间 15:00（冬令时 16:00）额度重置后继续；或换用额度更多的 Flash-Lite 模型；或切换到 DeepSeek。
+
+**安装版打不开 / 窗口空白？** 安装版使用 Windows 自带的 WebView2 组件显示界面（Windows 10/11 一般已经预装）。缺少时 PaperLook 会改为在浏览器中打开，也可以从 <https://developer.microsoft.com/microsoft-edge/webview2/> 安装。日志在 `%LOCALAPPDATA%\PaperLook\logs`。
+
 ---
 
 ## 技术概览
 
-- 后端：Python（FastAPI + SQLite），负责检索、排序、全文解析、DeepSeek 调用和数据存储；只监听 `127.0.0.1`。
+- 后端：Python（FastAPI + SQLite），负责检索、排序、全文解析、AI（DeepSeek / Gemini）调用和数据存储；只监听 `127.0.0.1`。
 - 前端：React + TypeScript + Tailwind CSS（已构建好放在 `backend/paperlook/static/`，运行时不需要 Node.js）。
+- 桌面应用：同一套代码用 PyInstaller 打包，界面显示在 pywebview（系统 WebView2）窗口中，Inno Setup 生成安装包。
+- 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)，变更见 [CHANGELOG.md](CHANGELOG.md)。GitHub Actions 在每次提交时于 Windows / Linux / macOS 上运行测试、检查前端构建产物、用启动脚本冒烟测试；推送 `v*` 标签时自动打包并发布 Release。
 - 详细设计见 [ARCHITECTURE.md](ARCHITECTURE.md)；当前进度见 [PROJECT_STATUS.md](PROJECT_STATUS.md)；继续开发请先读 [AGENT_GUIDE.md](AGENT_GUIDE.md)。
 
 ### 开发者命令
 
 ```bash
-# 后端测试（34 个单元/接口测试）
+# 后端测试
 .venv/Scripts/python -m pytest backend/tests          # Windows
-# 本地模拟 DeepSeek（不消耗真实额度），在设置里把服务地址改为 http://127.0.0.1:8790
+# 本地模拟 DeepSeek 与 Gemini（不消耗真实额度），在设置里把服务地址改为 http://127.0.0.1:8790
 .venv/Scripts/python backend/tests/mock_deepseek.py
 # 前端开发（热更新，接口代理到 8765）
 cd frontend && npm install && npm run dev
 # 修改前端后重新构建（输出到 backend/paperlook/static）
 cd frontend && npm run build
+# 打包 Windows 桌面应用（输出到 dist/；装了 Inno Setup 时同时生成安装包）
+python -m pip install -r requirements-desktop.txt
+powershell -File packaging/build_windows.ps1 -SmokeTest
 ```
+
+发布新版本：修改 `backend/paperlook/__init__.py` 与 `frontend/package.json` 的版本号，在 `CHANGELOG.md` 写好该版本的内容，提交后推送标签 `git tag vX.Y.Z && git push origin vX.Y.Z`，GitHub Actions 会自动打包并发布。
 
 ## 许可证
 

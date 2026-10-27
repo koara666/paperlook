@@ -1,8 +1,16 @@
 # 项目状态
 
-- **当前阶段**：第一阶段（v1.0）完成，可日常使用；已发布到 GitHub：<https://github.com/koara666/paperlook>（MIT）。
-- **最近更新**：2026-10-27（真实 DeepSeek 全流程验证、提示词缓存优化、GitHub 发布准备）
-- **运行状态**：`start.bat` 启动正常；Windows 11 + Python 3.14 + Edge 已实测。
+- **当前阶段**：v1.1.0（Windows 桌面应用 + Gemini + SemVer/CI/CD）；仓库 <https://github.com/koara666/paperlook>（MIT），Release 由 GitHub Actions 自动发布。
+- **最近更新**：2026-10-28
+- **运行状态**：安装版 `PaperLook.exe` 与源码版 `start.bat` 均在 Windows 11 实测启动正常。
+
+### 2026-10-28 更新（v1.1.0）
+- **评估**：有人建议用 Rust + GPUI 重写成「端应用」。结论是不重写：瓶颈在网络/AI 接口，阅读器依赖浏览器排版与 KaTeX，PDF 解析依赖 Python 生态；「不像应用」是分发问题。改为把同一套代码打包成桌面应用（理由见 ARCHITECTURE 第 8 节）。
+- **版本管理**：`CHANGELOG.md`、SemVer 约定、版本一致性测试；补打 `v1.0.0` 标签；设置页「检查更新」。
+- **CI/CD**：`ci.yml`（三平台 pytest、前端构建产物一致性、`start.bat`/`start.sh` 冒烟测试）；`release.yml`（标签 → 打包 → 冒烟测试 → Release）。
+- **Gemini**：原生接口客户端、免费档限速与大块翻译、代理、详细错误映射、今日请求数；前端 AI 设置页重做（服务选择、Gemini 免费额度说明）。
+- **桌面应用**：`desktop.py`（pywebview 窗口、单实例、关闭即退出）；PyInstaller + Inno Setup；安装版数据在 `%LOCALAPPDATA%\PaperLook`。
+- **Gemini 免费额度调查**（2026-10）：Google 不再公开固定数值，以 AI Studio 额度页为准；公开资料显示 Flash-Lite 约 10 次/分钟、500 次/天，Flash 约 5 次/分钟、20 次/天，每天太平洋时间 0 点（北京时间 15/16 点）重置；中国大陆与香港不在支持地区；免费档内容可能被用于改进产品。按本项目实测用量（1.3 万词论文全文翻译 10 次请求、每项分析 1 次），Flash-Lite 每天可完整处理二三十篇，Flash 只够一两篇。
 
 ### 2026-10-27 更新
 - 用真实 DeepSeek Key（deepseek-flash = DeepSeek-V4.1-Flash）完整验证了全文翻译、三项分析、摘要翻译（结果见下方测试表）。
@@ -43,7 +51,12 @@
 - [x] 设置页 7 个分类；深色模式；手机/平板/桌面响应式
 - [x] 备份导出/导入（不含 Key）、缓存清理、清空推荐历史、系统状态
 - [x] 一键启动 `start.bat`（首启自动建环境装依赖）、`start.sh`、桌面快捷方式脚本
-- [x] 文档：README / ARCHITECTURE / PROJECT_STATUS / AGENT_GUIDE / CLAUDE.md
+- [x] 文档：README / ARCHITECTURE / PROJECT_STATUS / AGENT_GUIDE / CLAUDE.md / CHANGELOG
+
+### v1.1 新增
+- [x] Windows 桌面应用（独立窗口、单实例、安装包与免安装版、按用户安装）
+- [x] Google Gemini（免费档模式、代理、错误说明、今日请求数），与 DeepSeek 一键切换
+- [x] SemVer + CHANGELOG + 检查更新；GitHub Actions CI 与自动发布
 
 ## 尚未实现（后续可做）
 - [ ] 阅读笔记（`paper_state.note` 字段已预留，尚无 UI）
@@ -56,7 +69,11 @@
 
 ## 已知问题与限制
 1. ~~真实 DeepSeek 成功调用未实测~~ → 已于 2026-10-27 用真实 Key 验证通过（见测试表）。目前只验证了 `deepseek-flash`；`deepseek-v4-pro` 与「深度思考」模式在真实 API 上尚未单独测试（参数格式与 flash 相同）。
-2. macOS / Linux 的 `start.sh` 未在真机上测试。
+2. macOS / Linux 的 `start.sh` 未在真机上测试（CI 的 Ubuntu / macOS 环境会自动启动测试）。
+9. Gemini 只用模拟服务做过完整验证（开发机没有 Gemini Key、且需要代理）；真实接口的思考级别、JSON 模式、配额错误格式按 2026-10 官方文档实现，并有自动降级。首次真实使用时建议先点「测试连接」。
+10. 安装包没有代码签名，首次运行会出现 SmartScreen 提示；首次启动因安全扫描约 20 秒，之后约 4 秒。
+11. Inno Setup 安装包只在 GitHub Actions 中构建（本机未安装 Inno Setup）；PyInstaller 打包与 exe 冒烟测试在本机和 CI 都会运行。
+12. 安装版与源码版数据目录不同，不会自动迁移（用备份导出/导入；Key 共用）。
 3. Semantic Scholar 匿名访问基本都会 429（已在 UI 提示需填 Key）；有 Key 时的成功路径未实测。
 4. OpenAlex 无 Key 时与同 IP 用户共享每日 $0.1 额度（约 100 次检索），超额时该来源失败但不影响其他来源。
 5. PDF 解析（PyMuPDF4LLM 版面分析模式）较慢：20 页约 30 秒；公式无法还原为 LaTeX（以原文本显示并标注、不翻译）；图片不显示。arXiv HTML 来源无这些问题。
@@ -64,7 +81,16 @@
 7. 期刊/会议质量依据来自内置列表（`recommend/venues.py`）与 OpenAlex 统计，覆盖以 CS 为主；其他领域主要依赖 OpenAlex 统计。
 8. 前端 JS 包约 740 KB（含 KaTeX），本地加载无感，未做代码分割。
 
-## 最近一次测试结果（2026-10-27）
+## 最近一次测试结果（2026-10-28，v1.1.0）
+
+| 测试 | 结果 |
+| --- | --- |
+| `pytest backend/tests` | **55 passed**（新增 Gemini 14 项、桌面 3 项、版本 4 项） |
+| Gemini 端到端（真实 PaperLook 服务 + 模拟 Gemini + 真实 arXiv 论文，免费档模式开启） | **13/13**：推荐不调用 AI、连接测试、打开论文不调用 AI、全文获取、全文翻译 94/94 段（4 次请求）、总结/模块/创新点/摘要翻译、缓存不重复调用、今日请求数统计 |
+| 浏览器 UI（Playwright + Edge） | AI 设置页浅色/深色/390px 无横向溢出、控制台无错误；检查更新提示正常；论文页 |
+| 安装版 exe（本机 PyInstaller 构建） | **11/11**：服务启动、`packaged` 标志、系统凭据管理器可用、前端与静态资源、窗口创建、第二次启动只切换窗口（0.2 秒退出）、关闭窗口后进程与服务退出、日志；冷启动约 21 秒（安全扫描），热启动约 3.7 秒出窗口；`build_windows.ps1 -SmokeTest` 通过，免安装 zip 77 MB |
+
+## 上一次测试结果（2026-10-27）
 
 | 测试 | 结果 |
 | --- | --- |
@@ -79,6 +105,7 @@
 | 模拟 GitHub 新用户（2026-10-27） | `git clone` 到含中文和空格的路径 → 双击 `start.bat`：首次安装 80 秒后启动 ✓ → 选方向 → 推荐 12 秒出 5 篇 ✓ → 全文（arXiv HTML）✓，全程 0 次 AI 调用；故意损坏 `.venv` 后再次启动 → 自动重建且数据保留 ✓；默认 pip 源不可达 → 自动改用清华镜像安装成功 ✓ |
 
 ## 下一步建议
-1. 发布到 GitHub 后，收集其他用户在不同电脑上的首次安装反馈（Python 版本、网络、镜像）。
+0. 用真实 Gemini Key（需代理）做一次连接测试、全文翻译与三项分析，确认免费档用量与本文档估算一致。
+1. 收集其他用户安装版的反馈（SmartScreen、WebView2、首次启动时间）。
 2. 阅读笔记 UI；基于收藏/不感兴趣的轻量个性化（如关键词加权）。
 3. 视需要扩充 `recommend/venues.py` 的期刊/会议列表。

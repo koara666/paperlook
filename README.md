@@ -45,7 +45,7 @@ PaperLook 是一个运行在你自己电脑上的个人科研阅读工具（Wind
 
 ## 从源码运行（Windows / macOS / Linux）
 
-**需要**：Python 3.10 或更高版本、能联网。
+**需要**：Python 3.11 或更高版本（PDF 解析组件 PyMuPDF 2.0 的要求）、能联网。
 
 1. **下载**：在 GitHub 页面点绿色的 **Code → Download ZIP**，解压到任意文件夹（路径里有中文或空格也没关系）。熟悉 git 的话也可以 `git clone https://github.com/koara666/paperlook.git`。
 2. **安装 Python**（如果还没有）：<https://www.python.org/downloads/>，安装时勾选 **“Add python.exe to PATH”**。没装 Python 时双击 `start.bat` 也会提示并打开下载页面。

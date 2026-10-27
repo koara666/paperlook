@@ -148,7 +148,7 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 ### 6.3 版本、CI 与发布
 
 - 版本号：`paperlook.__version__` 与 `frontend/package.json`，遵循 SemVer（含义见 `CHANGELOG.md` 开头），测试校验一致性。
-- CI（每次推送 / PR）：Windows（Python 3.14、3.13）、Ubuntu（3.10）、macOS（3.13）跑 pytest；Ubuntu 上 `npm ci && npm run build` 后要求 `backend/paperlook/static/` 无变化（`.gitattributes` 让前端源码在各平台都是 LF、构建产物按字节存储，保证构建结果一致）；三个系统都用 `start.bat` / `start.sh` 在全新环境中启动并请求 `/api/health` 与首页。
+- CI（每次推送 / PR）：Windows（Python 3.14、3.13）、Ubuntu（3.11，最低支持版本）、macOS（3.13）跑 pytest；Ubuntu 上 `npm ci && npm run build` 后要求 `backend/paperlook/static/` 无变化（`.gitattributes` 让前端源码在各平台都是 LF、构建产物按字节存储，保证构建结果一致）；三个系统都用 `start.bat` / `start.sh` 在全新环境中启动并请求 `/api/health` 与首页。
 - 发布（推送 `vX.Y.Z` 标签）：校验标签与版本号一致 → pytest → PyInstaller 打包 → 启动 exe 冒烟测试 → zip + Inno Setup 安装包 → GitHub Release（说明取自 CHANGELOG 对应小节 + 安装说明）。
 - 检查更新：`GET /api/update` 只在用户点击时请求 GitHub Releases API，只比较版本号、给出下载链接，不自动下载安装。
 

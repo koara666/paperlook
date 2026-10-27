@@ -25,6 +25,9 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 - 界面中写死的「DeepSeek」改为当前使用的 AI 服务名称。
 - 新增依赖 `httpx[socks]`（Gemini 代理支持 socks5）；源码版下次启动时会自动安装。
 
+### 修复
+- 源码版最低 Python 版本改为 3.11：PDF 解析组件 PyMuPDF 2.0 需要 3.11，之前用 3.10 启动会在安装组件时失败（CI 发现）。
+
 ### 开发
 - 版本号遵循语义化版本，`CHANGELOG.md` 记录每个版本；测试会检查各处版本号一致。
 - GitHub Actions：每次提交在 Windows / Linux / macOS 上运行测试、检查前端构建产物与源码一致、用 `start.bat` / `start.sh` 在全新环境中启动冒烟测试；推送 `v*` 标签自动打包、冒烟测试并发布 Release。

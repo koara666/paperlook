@@ -19,7 +19,7 @@ $env:PYTHONUTF8 = "1"
 function Invoke-Native([string]$Exe, [string[]]$Arguments) {
     $old = $ErrorActionPreference
     $ErrorActionPreference = "Continue"
-    try { & $Exe @Arguments 2>&1 | ForEach-Object { "$_" } | Out-Host } finally { $ErrorActionPreference = $old }
+    try { & $Exe @Arguments 2>&1 | ForEach-Object { "$_" } } finally { $ErrorActionPreference = $old }
     if ($LASTEXITCODE -ne 0) { throw "$Exe failed (exit code $LASTEXITCODE)" }
 }
 

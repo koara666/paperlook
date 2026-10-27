@@ -20,7 +20,7 @@ jobs:
         include:
           - { os: windows-latest, python: "3.14" }  # the developer's own setup
           - { os: windows-latest, python: "3.13" }  # the Python bundled into the desktop app
-          - { os: ubuntu-latest, python: "3.10" }   # oldest supported version
+          - { os: ubuntu-latest, python: "3.11" }   # oldest supported version (PyMuPDF 2.0 needs 3.11)
           - { os: macos-latest, python: "3.13" }
     env:
       PYTHONUTF8: "1"
@@ -33,11 +33,17 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
       - name: 安装依赖
+        shell: bash
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pytest
+          python -m pip install -r requirements.txt pytest 2>&1 | tee "$RUNNER_TEMP/pip.log"
       - name: pytest
-        run: python -m pytest backend/tests -q
+        shell: bash
+        run: python -m pytest backend/tests -q 2>&1 | tee "$RUNNER_TEMP/pytest.log"
+      - name: 失败时把日志写成注释（不登录也能通过 API 查看）
+        if: failure()
+        shell: bash
+        run: python scripts/ci_annotate.py "$RUNNER_TEMP/pip.log" "$RUNNER_TEMP/pytest.log"
 
   frontend:
     name: 前端构建
@@ -71,6 +77,7 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
     env:
       PAPERLOOK_DISABLE_KEYRING: "1"
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -93,3 +100,7 @@ jobs:
           curl -fs http://127.0.0.1:8765/ | grep -q 'id="root"' || { echo "首页没有返回前端页面"; exit 1; }
           curl -fs http://127.0.0.1:8765/api/settings > /dev/null
           echo "启动成功"
+      - name: 失败时把日志写成注释
+        if: failure()
+        shell: bash
+        run: python scripts/ci_annotate.py "$RUNNER_TEMP/app.log" "$RUNNER_TEMP/paperlook-data/logs/paperlook.log"

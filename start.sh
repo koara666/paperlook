@@ -13,12 +13,12 @@ fi
 if [ ! -x ".venv/bin/python" ]; then
   PY=""
   for c in python3 python; do
-    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)'; then
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
       PY="$c"; break
     fi
   done
   if [ -z "$PY" ]; then
-    echo "[PaperLook] Python 3.10 or newer was not found. Install it from https://www.python.org/downloads/ and run ./start.sh again."
+    echo "[PaperLook] Python 3.11 or newer was not found. Install it from https://www.python.org/downloads/ and run ./start.sh again."
     exit 1
   fi
   echo "[PaperLook] First start: creating the Python environment..."

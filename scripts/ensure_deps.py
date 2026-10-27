@@ -38,8 +38,8 @@ def main() -> int:
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
         except Exception:
             pass
-    if sys.version_info < (3, 10):
-        print(f"PaperLook 需要 Python 3.10 或更高版本，当前为 {sys.version.split()[0]}。")
+    if sys.version_info < (3, 11):
+        print(f"PaperLook 需要 Python 3.11 或更高版本，当前为 {sys.version.split()[0]}。")
         print("请从 https://www.python.org/downloads/ 安装新版 Python，删除本目录下的 .venv 文件夹后重新启动。")
         return 1
     digest = hashlib.sha256(REQ.read_bytes()).hexdigest()

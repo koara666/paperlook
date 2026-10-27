@@ -20,7 +20,7 @@ echo [PaperLook] First start: creating the Python environment...
 where py >nul 2>nul
 if %errorlevel%==0 (py -3 -m venv .venv) else (python -m venv .venv)
 if not exist ".venv\Scripts\python.exe" goto nopython
-".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" || (
+".venv\Scripts\python.exe" -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" || (
   rmdir /s /q ".venv"
   goto nopython
 )
@@ -39,7 +39,7 @@ exit /b
 
 :nopython
 echo.
-echo [PaperLook] Python 3.10 or newer was not found.
+echo [PaperLook] Python 3.11 or newer was not found.
 echo   1. Install it from https://www.python.org/downloads/
 echo      and tick "Add python.exe to PATH" in the installer.
 echo   2. Double-click start.bat again.

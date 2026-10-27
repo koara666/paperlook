@@ -1,0 +1,9 @@
+# Runtime dependencies (installed automatically by start.bat / start.sh)
+fastapi>=0.115
+uvicorn[standard]>=0.30
+httpx>=0.27
+beautifulsoup4>=4.12
+lxml>=5.0
+pymupdf>=2.0
+pymupdf4llm>=2.0
+keyring>=25.0

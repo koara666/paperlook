@@ -1,0 +1,33 @@
+# --- user data: database, logs, caches, encrypted key fallback (NEVER commit) ---
+data/
+*.db
+*.db-wal
+*.db-shm
+secrets.bin
+*.log
+
+# --- environments ---
+.venv/
+venv/
+node_modules/
+frontend/node_modules/
+
+# --- python / tooling caches ---
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- secrets that might be created by hand ---
+.env
+.env.*
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# NOTE: backend/paperlook/static/ (the built frontend) IS committed on purpose,
+# so the app runs without Node.js. Rebuild it with `npm run build` in frontend/.

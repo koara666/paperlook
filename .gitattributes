@@ -1,0 +1,12 @@
+# Windows scripts need CRLF (cmd mis-parses labels in LF files); shell scripts need LF.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+*.sh    text eol=lf
+
+# Prebuilt frontend: never diff or normalise.
+backend/paperlook/static/** -diff
+*.ico   binary
+*.png   binary
+*.woff2 binary
+*.woff  binary
+*.ttf   binary

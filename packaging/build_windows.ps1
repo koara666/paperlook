@@ -67,5 +67,8 @@ if (-not $iscc) {
 $lang = Get-ChildItem -Path (Join-Path $iscc.DirectoryName "Languages") -Recurse -Filter "ChineseSimplified*.isl" -ErrorAction SilentlyContinue | Select-Object -First 1
 $defines = @("/DAppVersion=$version")
 if ($lang) { $defines += "/DLangFile=$($lang.FullName)" } else { Write-Warning "Simplified Chinese messages not found; installer will be in English" }
+if ($env:GITHUB_ACTIONS) {  # visible as an annotation through the public API
+    "::notice title=Installer::Inno Setup $($iscc.DirectoryName); messages: $(if ($lang) { $lang.Name } else { 'Default.isl (English)' })"
+}
 Invoke-Native $iscc.FullName ($defines + @("packaging\installer.iss"))
 Get-ChildItem dist -File | ForEach-Object { "{0,-50} {1,8:N1} MB" -f $_.Name, ($_.Length / 1MB) }

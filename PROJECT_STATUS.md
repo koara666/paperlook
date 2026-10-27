@@ -10,6 +10,8 @@
 - **CI/CD**：`ci.yml`（三平台 pytest、前端构建产物一致性、`start.bat`/`start.sh` 冒烟测试）；`release.yml`（标签 → 打包 → 冒烟测试 → Release）。
 - **Gemini**：原生接口客户端、免费档限速与大块翻译、代理、详细错误映射、今日请求数；前端 AI 设置页重做（服务选择、Gemini 免费额度说明）。
 - **桌面应用**：`desktop.py`（pywebview 窗口、单实例、关闭即退出）；PyInstaller + Inno Setup；安装版数据在 `%LOCALAPPDATA%\PaperLook`。
+- **CI 发现并修复的问题**：① 源码版最低 Python 实际是 3.11（PyMuPDF 2.0 / onnxruntime 要求），之前允许 3.10 会安装失败；② 最新的 Python 3.15 没有 onnxruntime 安装包，`start.bat`/`start.sh` 改为优先选择 3.14 → 3.11，只有 3.15 时给出明确提示；③ PyInstaller 在 setuptools 可用的环境中与 `distutils` 排除项冲突，改为排除 cffi 的构建期模块。
+- **CI 结果**：Windows（3.14、3.13）、Ubuntu（3.11）、macOS（3.13）测试，前端构建产物一致性，三平台启动脚本冒烟测试全部通过；Release 工作流在 CI 上完成打包、exe 冒烟测试、免安装 zip 与 Inno Setup 安装包。
 - **Gemini 免费额度调查**（2026-10）：Google 不再公开固定数值，以 AI Studio 额度页为准；公开资料显示 Flash-Lite 约 10 次/分钟、500 次/天，Flash 约 5 次/分钟、20 次/天，每天太平洋时间 0 点（北京时间 15/16 点）重置；中国大陆与香港不在支持地区；免费档内容可能被用于改进产品。按本项目实测用量（1.3 万词论文全文翻译 10 次请求、每项分析 1 次），Flash-Lite 每天可完整处理二三十篇，Flash 只够一两篇。
 
 ### 2026-10-27 更新

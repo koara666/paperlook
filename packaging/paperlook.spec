@@ -26,9 +26,11 @@ a = Analysis(
     pathex=[BACKEND],
     datas=datas,
     hiddenimports=hiddenimports,
-    # setuptools is only imported by build-time code paths (cffi); 3.12+ venvs do not even ship it
+    # setuptools / distutils are only reached through cffi's build-time shim (pythonnet uses cffi at
+    # runtime without compiling). Exclude the shim, not "distutils" itself: PyInstaller's distutils
+    # hook aliases it to setuptools._distutils and fails if "distutils" is excluded.
     excludes=["tkinter", "pytest", "playwright", "PIL.ImageTk", "IPython", "matplotlib", "numpy.tests",
-              "setuptools", "distutils", "pkg_resources"],
+              "cffi._shimmed_dist_utils", "cffi.setuptools_ext", "setuptools", "pkg_resources"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

@@ -25,6 +25,7 @@ export interface Settings {
   signals: Record<string, boolean>;
   ai_rerank: boolean;
   auto_fetch_on_open: boolean;
+  personalize: boolean;
   ai: {
     base_url: string;
     model: string;
@@ -58,6 +59,7 @@ export interface DirectionPreset {
 }
 
 export interface Meta {
+  version: string;
   direction_presets: DirectionPreset[];
   arxiv_categories: { id: string; name: string }[];
   ranking_presets: Record<string, { relevance: number; quality: number; freshness: number }>;
@@ -117,6 +119,8 @@ export interface Breakdown {
   relevance: number;
   keyword_relevance: number;
   ai_relevance: number | null;
+  /** Adjustment from the user's own feedback (absent in recommendations made before 1.2). */
+  preference?: { adjust: number; paper_id: string | null; title: string | null; kind: string | null } | null;
   quality: number;
   quality_confidence: number;
   quality_insufficient: boolean;

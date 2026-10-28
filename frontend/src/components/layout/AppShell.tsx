@@ -1,7 +1,7 @@
 import { BookOpenText, Library, Monitor, Moon, Settings2, Sparkles, Sun } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
-import { useAiConfig, useDirections, useSettings, useUpdateSettings } from "../../api/hooks";
+import { useAiConfig, useDirections, useMeta, useSettings, useUpdateSettings } from "../../api/hooks";
 import { cn } from "../../lib/cn";
 import { Tooltip } from "../ui/overlay";
 
@@ -99,6 +99,7 @@ function DirectionList() {
 export function AppShell({ children }: { children: ReactNode }) {
   const loc = useLocation();
   const isReader = loc.pathname.startsWith("/paper/");
+  const meta = useMeta();
   return (
     <div className="min-h-screen">
       {/* desktop sidebar */}
@@ -132,7 +133,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <div className="mt-auto space-y-1 border-t border-border pt-3">
           <AiStatus />
           <div className="flex items-center justify-between px-1.5">
-            <span className="text-[11px] text-text-3">v1.0</span>
+            <span className="text-[11px] text-text-3">{meta.data ? `v${meta.data.version}` : ""}</span>
             <ThemeToggle />
           </div>
         </div>

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from . import feedback
 from .freshness import age_days, freshness
 from .quality import assess
 from .relevance import CompiledDirection, RelevanceResult, score_paper
@@ -36,14 +37,19 @@ class Scored:
     freshness: float
     score: float = 0.0
     ai: dict[str, Any] | None = None
+    pref: feedback.Preference | None = None
     reasons: list[str] = field(default_factory=list)
 
     @property
     def relevance_score(self) -> float:
+        base = self.relevance.score
         if self.ai and self.ai.get("relevance") is not None:
             # Blend keyword relevance with the model's judgement (explicitly opted-in AI re-rank).
-            return 0.4 * self.relevance.score + 0.6 * float(self.ai["relevance"])
-        return self.relevance.score
+            base = 0.4 * self.relevance.score + 0.6 * float(self.ai["relevance"])
+        if self.pref:
+            # The user's own feedback (see feedback.py): ordering only, candidacy stays keyword-based.
+            base = min(1.0, max(0.0, base + self.pref.adjust))
+        return base
 
 
 def score_candidates(papers: list[dict[str, Any]], directions: list[CompiledDirection], weights: dict[str, float],
@@ -132,6 +138,9 @@ def build_reasons(s: Scored, today: date) -> list[str]:
     if not parts and r.category_match:
         parts.append("属于该方向的 arXiv 分类")
     reasons.append(f"匹配「{s.direction.name}」：" + "；".join(parts) if parts else f"匹配「{s.direction.name}」")
+    pref_reason = feedback.reason(s.pref)
+    if pref_reason:
+        reasons.append(pref_reason)
     if s.ai and s.ai.get("reason"):
         reasons.append("AI 评估：" + s.ai["reason"])
     for sig in s.quality["signals"]:
@@ -153,6 +162,7 @@ def breakdown(s: Scored, weights: dict[str, float]) -> dict[str, Any]:
         "relevance": round(s.relevance_score, 4),
         "keyword_relevance": round(s.relevance.score, 4),
         "ai_relevance": (s.ai or {}).get("relevance"),
+        "preference": s.pref.to_dict() if s.pref else None,
         "quality": s.quality["score"],
         "quality_confidence": s.quality["confidence"],
         "quality_insufficient": s.quality["insufficient"],

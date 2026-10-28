@@ -222,7 +222,8 @@ const NOVELTY: Record<string, { label: string; tone: "accent" | "success" | "neu
 
 function flowChain(flow: any[]): string[] | null {
   // If the edges form a simple path, show it as a chain.
-  const edges = flow.filter((f) => f && f.from && f.to).map((f) => [str(f.from), str(f.to)]);
+  // Self-loops (a module "flowing" into itself, seen from Gemini) are shown as plain items, not edges.
+  const edges = flow.filter((f) => f && f.from && f.to && str(f.from) !== str(f.to)).map((f) => [str(f.from), str(f.to)]);
   if (!edges.length) return null;
   const outs = new Map(edges.map(([a, b]) => [a, b]));
   const ins = new Set(edges.map(([, b]) => b));
@@ -310,8 +311,12 @@ export function ModulesView({ c }: { c: any }) {
               <li key={i}>
                 <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                   <span className="font-medium text-text">{str(f.from)}</span>
-                  <ArrowRight className="size-3.5 translate-y-0.5 text-text-3" />
-                  <span className="font-medium text-text">{str(f.to)}</span>
+                  {str(f.to) !== str(f.from) && (
+                    <>
+                      <ArrowRight className="size-3.5 translate-y-0.5 text-text-3" />
+                      <span className="font-medium text-text">{str(f.to)}</span>
+                    </>
+                  )}
                 </div>
                 {f.description && (
                   <p className="mt-0.5 leading-relaxed text-text-2">

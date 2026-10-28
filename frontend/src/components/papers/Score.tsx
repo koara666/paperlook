@@ -50,12 +50,33 @@ function Bar({ label, icon, value, weight, note }: { label: string; icon: React.
   );
 }
 
+const KIND_LABEL: Record<string, string> = { starred: "收藏", noted: "写过笔记", analyzed: "用 AI 分析过", opened: "读过", dismissed: "标记为不感兴趣" };
+
+function PreferenceLine({ p }: { p: NonNullable<Breakdown["preference"]> }) {
+  const pts = Math.round(p.adjust * 100);
+  const up = p.adjust > 0;
+  const why = p.title && p.kind && Math.abs(p.adjust) >= 0.03
+    ? `与你${KIND_LABEL[p.kind] ?? "关注"}的《${p.title}》相近`
+    : up ? "与你的收藏和阅读记录更接近" : "与你的收藏和阅读记录关联较弱";
+  return (
+    <p className="mt-1 flex gap-1 text-[12px] leading-snug text-text-3">
+      <span className={cn("shrink-0 tabular-nums font-medium", up ? "text-success" : "text-text-2")}>
+        按你的反馈 {up ? "+" : pts === 0 ? "±" : "−"}{Math.abs(pts)}
+      </span>
+      <span className="min-w-0 truncate" title={why}>· {why}</span>
+    </p>
+  );
+}
+
 export function BreakdownPanel({ b, className }: { b: Breakdown; className?: string }) {
   const kw = [...b.matched.title.map((k) => ({ k, t: true })), ...b.matched.abstract.map((k) => ({ k, t: false }))];
   return (
     <div className={cn("space-y-3", className)}>
-      <Bar label="研究相关度" icon={<Target className="size-3.5" />} value={b.relevance} weight={b.weights.relevance}
-        note={b.ai_relevance != null ? "含 AI 精排" : undefined} />
+      <div>
+        <Bar label="研究相关度" icon={<Target className="size-3.5" />} value={b.relevance} weight={b.weights.relevance}
+          note={b.ai_relevance != null ? "含 AI 精排" : undefined} />
+        {b.preference && Math.abs(b.preference.adjust) >= 0.005 && <PreferenceLine p={b.preference} />}
+      </div>
       <Bar label="论文质量" icon={<Award className="size-3.5" />} value={b.quality} weight={b.weights.quality}
         note={b.quality_insufficient ? "依据不足，按中性值计" : b.quality_confidence < 0.5 ? "依据有限" : undefined} />
       <Bar label="时效性" icon={<Clock className="size-3.5" />} value={b.freshness} weight={b.weights.freshness} />

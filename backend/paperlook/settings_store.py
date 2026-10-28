@@ -20,6 +20,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "ai_rerank": False,
     # Run the (non-AI) search automatically the first time the app is opened each day.
     "auto_fetch_on_open": False,
+    # Let the user's feedback (stars, notes, "not interested") adjust the order of candidates.
+    "personalize": True,
     "ai": {
         "provider": "deepseek",  # deepseek | gemini
         # DeepSeek (kept at the top level of "ai" for compatibility with 1.0 settings and backups)
@@ -95,6 +97,7 @@ def _validate(s: dict) -> dict:
             rest = w["quality"] + w["freshness"] or 1.0
             w = {"relevance": 0.2, "quality": 0.8 * w["quality"] / rest, "freshness": 0.8 * w["freshness"] / rest}
         s["weights"] = {k: round(v, 4) for k, v in w.items()}
+    s["personalize"] = bool(s.get("personalize", True))
     ai = s["ai"]
     ai["concurrency"] = int(_clamp(ai.get("concurrency"), 1, 8, 4))
     base_url = str(ai.get("base_url") or "").strip().rstrip("/")

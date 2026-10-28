@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import papers as papers_repo
 from .ai import analyze, translate
 
 
@@ -197,6 +198,9 @@ def analysis_markdown(paper: dict[str, Any]) -> str:
     out = [f"# {paper['title']}", ""]
     meta = [x for x in [", ".join(paper.get("authors", [])[:10]), paper.get("published"), paper.get("venue"), paper.get("url")] if x]
     out += [" · ".join(meta), ""]
+    note = (papers_repo.get_state(paper["id"]).get("note") or "").strip()
+    if note:
+        out += ["## 我的笔记", "", note, ""]
     renderers = {"summary": ("论文总结", _summary_md), "modules": ("关键模块分析", _modules_md),
                  "contributions": ("创新点与贡献", _contributions_md)}
     found = False

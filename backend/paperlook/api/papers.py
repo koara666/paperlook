@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .. import db, export, papers as papers_repo, settings_store
+from .. import cite, db, export, papers as papers_repo, settings_store
 from ..ai import analyze, translate
 from ..ai.client import is_configured, not_configured_error
 from ..errors import AppError
@@ -87,8 +87,7 @@ def ai_state(paper: dict[str, Any], doc: dict[str, Any] | None) -> dict[str, Any
     return out
 
 
-@router.get("/papers")
-def library(filter: str = "all", q: str = "", limit: int = 30, offset: int = 0):
+def _library_where(filter: str, q: str) -> tuple[str, list[Any]]:
     where = ["1=1"]
     params: list[Any] = []
     if filter == "starred":
@@ -97,6 +96,8 @@ def library(filter: str = "all", q: str = "", limit: int = 30, offset: int = 0):
         where.append("s.read_at IS NULL")
     elif filter == "read":
         where.append("s.read_at IS NOT NULL")
+    elif filter == "noted":
+        where.append("TRIM(COALESCE(s.note, '')) <> ''")
     elif filter == "analyzed":
         where.append("(p.id IN (SELECT paper_id FROM ai_results WHERE kind IN ('summary','modules','contributions')) "
                      "OR p.id IN (SELECT paper_id FROM translations))")
@@ -106,14 +107,22 @@ def library(filter: str = "all", q: str = "", limit: int = 30, offset: int = 0):
         where.append("COALESCE(s.dismissed,0) = 1")
     if q.strip():
         like = f"%{q.strip()}%"
-        where.append("(p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.venue LIKE ?)")
-        params += [like, like, like, like]
-    w = " AND ".join(where)
+        where.append("(p.title LIKE ? OR p.abstract LIKE ? OR p.authors LIKE ? OR p.venue LIKE ? OR s.note LIKE ?)")
+        params += [like, like, like, like, like]
+    return " AND ".join(where), params
+
+
+_LIBRARY_ORDER = "ORDER BY COALESCE(last_rec, p.created_at) DESC"
+_LAST_REC = "(SELECT MAX(r.created_at) FROM recommendations r WHERE r.paper_id = p.id) AS last_rec"
+
+
+@router.get("/papers")
+def library(filter: str = "all", q: str = "", limit: int = 30, offset: int = 0):
+    w, params = _library_where(filter, q)
     total = (db.query_one(f"SELECT COUNT(*) AS n FROM papers p LEFT JOIN paper_state s ON s.paper_id = p.id WHERE {w}", params) or {}).get("n", 0)
     rows = db.query(
-        f"SELECT p.*, (SELECT MAX(r.created_at) FROM recommendations r WHERE r.paper_id = p.id) AS last_rec "
-        f"FROM papers p LEFT JOIN paper_state s ON s.paper_id = p.id WHERE {w} "
-        f"ORDER BY COALESCE(last_rec, p.created_at) DESC LIMIT ? OFFSET ?",
+        f"SELECT p.*, {_LAST_REC} FROM papers p LEFT JOIN paper_state s ON s.paper_id = p.id WHERE {w} "
+        f"{_LIBRARY_ORDER} LIMIT ? OFFSET ?",
         (*params, max(1, min(limit, 100)), max(0, offset)),
     )
     ids = [r["id"] for r in rows]
@@ -125,6 +134,25 @@ def library(filter: str = "all", q: str = "", limit: int = 30, offset: int = 0):
         items.append({"paper": papers_repo.card(p), "ai_status": ai.get(p["id"], {}),
                       "recommendation": {k: rec[k] for k in ("score", "direction_name", "recommended_at", "ai")} if rec else None})
     return {"items": items, "total": total}
+
+
+@router.get("/library/bibtex")
+def library_bibtex(filter: str = "all", q: str = ""):
+    """BibTeX for every paper the library view currently shows (same filter and search)."""
+    w, params = _library_where(filter, q)
+    rows = db.query(f"SELECT p.*, {_LAST_REC} FROM papers p LEFT JOIN paper_state s ON s.paper_id = p.id "
+                    f"WHERE {w} {_LIBRARY_ORDER} LIMIT 2000", params)
+    if not rows:
+        raise AppError("当前列表没有论文，无法导出。", status_code=404)
+    text = cite.bibtex_many([papers_repo._decode(r) for r in rows])
+    return Response(text, media_type="application/x-bibtex; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote('PaperLook 文献.bib')}"})
+
+
+@router.get("/papers/{paper_id}/cite")
+def paper_cite(paper_id: str):
+    p = _require(paper_id)
+    return {"bibtex": cite.bibtex(p), "gbt7714": cite.gbt7714(p)}
 
 
 @router.get("/papers/{paper_id}")

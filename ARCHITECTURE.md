@@ -45,10 +45,11 @@
 | `papers.py` | 论文仓储：合并写入、用户状态、已推荐身份集合 |
 | `jobs.py` | 后台任务：进度、取消、重启后标记中断、同 (kind, paper) 去重 |
 | `sources/` | `base.py`（RawPaper、HTTP 重试、限速）+ arxiv / openalex / semantic_scholar / pubmed / hf_daily；注册表在 `sources/__init__.py` |
-| `recommend/` | `engine`（流程编排）、`dedupe`、`relevance`、`quality`、`venues`（顶会/期刊表）、`freshness`、`ranker` |
+| `recommend/` | `engine`（流程编排）、`dedupe`、`relevance`、`quality`、`venues`（顶会/期刊表）、`freshness`、`feedback`（用户反馈偏好）、`ranker` |
 | `fulltext/` | `model`（文档结构与可翻译单元）、`arxiv_html`、`pdf`、`fetcher`（来源选择与缓存） |
 | `ai/` | `client`（`BaseClient` → `DeepSeekClient` / `GeminiClient`：重试、错误映射、限速、用量记录）、`prompts`、`translate`、`analyze`、`rerank` |
-| `export.py` | 译文/AI 分析导出为 Markdown |
+| `export.py` | 译文/AI 分析（含笔记）导出为 Markdown |
+| `cite.py` | BibTeX 与 GB/T 7714-2015 引用（只用来源提供的事实：作者自述的「已接收」不当作发表信息，arXiv 论文按预印本 [EB/OL] 引用） |
 | `api/` | HTTP 路由 |
 | `backend/tests/` | pytest 测试 + `mock_deepseek.py`（本地模拟 DeepSeek 与 Gemini，用于无额度测试） |
 | `packaging/` | `paperlook.spec`（PyInstaller）、`installer.iss`（Inno Setup，按用户安装）、`build_windows.ps1`（打包 + 冒烟测试 + zip + 安装包）、`paperlook_app.py`（exe 入口） |
@@ -70,7 +71,7 @@
 4. **时间过滤**：只保留发布日期在窗口内且日期可靠（exact/approx）的论文；日期未知的排除并计数。
 5. **去重复推荐**：已推荐或「不感兴趣」的论文（按身份键）永不再出现。
 6. **信号增强**：HF Daily Papers 点赞数（按天缓存）、OpenAlex 期刊/会议统计（30 天缓存）。
-7. **评分与选择**（见第 5 节），可选 AI 精排（显式开启；`auto` 模式永不调用 AI）。
+7. **评分与选择**（见第 5 节），之后按用户反馈调整相关度（`settings.personalize`，默认开），可选 AI 精排（显式开启；`auto` 模式永不调用 AI）。
 8. **持久化**：`rec_batches` + `recommendations`（含评分构成 breakdown 与中文推荐理由），论文写入 `papers`。
 
 ### 3.2 全文（`POST /papers/{id}/fulltext` → job "fulltext"，免费，打开标签即自动执行）
@@ -99,7 +100,7 @@
 | `settings` | `key='user'` 的设置 JSON |
 | `directions` | 研究方向（关键词、排除词、分类为 JSON 数组） |
 | `papers` | 合并后的论文元数据；`signals`（引用、HF 点赞、代码链接、期刊 ID…）与 `sources` 为 JSON |
-| `paper_state` | 已读、收藏、不感兴趣、打开时间、笔记（预留） |
+| `paper_state` | 已读、收藏、不感兴趣、打开时间、笔记（概览页「我的笔记」，≤ 2 万字） |
 | `rec_batches` / `recommendations` | 每次推荐的参数、统计、提示信息；每篇的排名、分数、breakdown、理由、方向、AI 精排结果 |
 | `fulltext` | 解析后的文档 JSON |
 | `translations` | 按单元保存的译文（unit_id 与文档块 id 对应） |
@@ -120,6 +121,7 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 - **quality**（quality.py + venues.py）：只用可验证信号——venue 0.40（作者注明的接收/发表，排除 submitted/under review/ARR；或 OpenAlex 期刊 2 年平均被引）、citations 0.25（仅发表 ≥30 天的论文，按月均被引或 OpenAlex 百分位）、community 0.20（HF 点赞）、completeness 0.15（开源代码、页数）。按证据量收缩到中性值：`quality = c·observed + (1−c)·0.5`，`c` = 已有信号权重和。没有证据的新论文就是 0.5，不加分也不扣分。
 - **freshness**（freshness.py）：`0.2 + 0.8 · 0.5^(age/半衰期)`，半衰期 3/7/21 天（偏好最新/均衡/不太在意）；近似日期 ×0.85。时间窗口只决定能否成为候选，freshness 只影响排序。
 - **跨方向选择**（ranker.py）：每篇归入最匹配的方向；名额按「关注程度」权重用最大余数法分配；某方向候选不足时名额让给其他方向的高分论文；最终按总分排序。
+- **用户反馈偏好**（feedback.py）：正向反馈 = 收藏/有笔记（权重 1）、用 AI 翻译或分析过（0.6）、打开过（0.25）；负向 = 不感兴趣（1）。候选与反馈论文按 TF-IDF（标题计两次 + 标题二元组 + 摘要，去停用词）余弦相似度比较：`affinity = 前 3 个加权正向相似度的均值 − 前 3 个负向相似度的均值`，`adjust = 0.15 · tanh((affinity − 全部候选的中位数) / 0.08)`，加到 relevance（截断到 [0, 1]）。以中位数居中，所以只改变相对顺序；与 freshness 一样不决定候选资格（`MIN_RELEVANCE` 仍只看关键词）。正向（权重 ≥ 0.6）或负向反馈都少于 3 篇时不生效。breakdown 记录 `preference`（调整量与最相近的反馈论文），推荐理由写明「与你收藏的《…》相近」。
 - **自定义权重**：归一化后相关度不低于 20%。
 
 ## 6. AI 服务接入

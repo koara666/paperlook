@@ -95,6 +95,10 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 | AI 服务选择 / Key / 用量 | `ai/client.py`（`get_client`、`make_client`、`active_provider`、`gemini_requests_today`）、`api/settings.py`（`/ai/*`） |
 | 桌面窗口 / 单实例 / 安装版数据目录 | `desktop.py`、`config._default_data_dir` |
 | Markdown 导出 | `export.py` |
+| 引用（BibTeX / GB/T 7714） | `cite.py`、`GET /papers/{id}/cite`、`GET /library/bibtex` |
+| 用户反馈偏好（排序微调） | `recommend/feedback.py`（`preferences`、`reason`），在 `engine.run` 中按 `settings.personalize` 应用 |
+| 阅读笔记 | 后端 `paper_state.note`（`PATCH /papers/{id}/state`）；前端 `pages/paper/NoteCard.tsx` |
+| 复制到剪贴板 | `frontend/src/lib/clipboard.ts`（`copyText`，桌面 WebView 兼容） |
 | 设置/方向/来源/AI 配置 API | `api/settings.py` |
 | 前端数据请求 | `frontend/src/api/hooks.ts`（React Query hooks）、`api/types.ts` |
 | 前端通用组件 | `components/ui/primitives.tsx`（Button/Badge/Card/Switch/Input/Segmented/Notice/…）、`overlay.tsx`（Dialog/Confirm/Toast/Popover/Menu/Tooltip）、`ChipInput.tsx` |

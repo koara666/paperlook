@@ -195,6 +195,12 @@ export function RecommendSection() {
         >
           <Switch checked={s.ai_rerank} onChange={(v) => set({ ai_rerank: v })} label="AI 精排" />
         </Row>
+        <Row
+          title="根据我的反馈调整排序"
+          desc="在本机比较候选论文与你收藏、写过笔记、用 AI 分析过、读过的论文，以及标记为「不感兴趣」的论文：相近的排得更靠前，与不感兴趣的相近的排得更靠后（相关度最多 ±15 分）。只影响排序，不影响哪些论文入选；反馈少于 3 篇时不生效；不调用 AI。"
+        >
+          <Switch checked={s.personalize} onChange={(v) => set({ personalize: v })} label="根据反馈调整排序" />
+        </Row>
         <Row title="打开应用时自动获取" desc="每天第一次打开「今日推荐」时，如果还没有推荐，就自动检索一次（只使用免费的论文数据接口，不调用 AI）。">
           <Switch checked={s.auto_fetch_on_open} onChange={(v) => set({ auto_fetch_on_open: v })} label="自动获取" />
         </Row>
@@ -222,7 +228,10 @@ export function RecommendSection() {
               <strong className="text-text">4. 时效性：</strong>半衰期衰减，最新的论文得分最高，但始终保留 20% 的底分。
             </p>
             <p>
-              <strong className="text-text">5. 挑选：</strong>综合评分 = 各分项 × 权重。每个研究方向按「关注程度」分配名额，名额用不完时由其他方向的高分论文补上。
+              <strong className="text-text">5. 你的反馈：</strong>收藏、笔记、AI 分析、阅读记录和「不感兴趣」会在本机与候选论文比较（标题与摘要的词语相似度），对研究相关度做最多 ±15 分的调整，并在评分构成里说明依据。它只改变排序，不会让不相关的论文入选。
+            </p>
+            <p>
+              <strong className="text-text">6. 挑选：</strong>综合评分 = 各分项 × 权重。每个研究方向按「关注程度」分配名额，名额用不完时由其他方向的高分论文补上。
             </p>
           </div>
         )}

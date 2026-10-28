@@ -16,7 +16,7 @@ from ..jobs import Job
 from ..sources import REGISTRY, RawPaper, SourceError, SourceQuery
 from ..sources import hf_daily
 from ..sources.openalex import fetch_source_stats
-from . import dedupe, ranker
+from . import dedupe, feedback, ranker
 from .relevance import compile_direction
 
 log = logging.getLogger(__name__)
@@ -153,6 +153,14 @@ def run(job: Job, mode: str = "today", refresh: bool = False) -> dict[str, Any]:
     stats.update(rstats)
     stats["relevant"] = len(scored)
 
+    # The user's own feedback (stars, notes, "not interested"…) adjusts the order, never candidacy.
+    if settings.get("personalize", True) and scored:
+        prefs = feedback.preferences([s.paper for s in scored])
+        for i, s in enumerate(scored):
+            s.pref = prefs.get(i)
+            ranker.compute_score(s, weights)
+        stats["personalized"] = bool(prefs)
+
     ai_info: dict[str, Any] | None = None
     # "auto" runs (triggered by opening the app) never spend API tokens.
     if settings.get("ai_rerank") and scored and mode != "auto":
@@ -172,6 +180,7 @@ def run(job: Job, mode: str = "today", refresh: bool = False) -> dict[str, Any]:
                 "time_preference": settings["time_preference"], "sources": sources,
                 "directions": [{"id": d["id"], "name": d["name"]} for d in dirs],
                 "ai_rerank": bool(ai_info and ai_info.get("used")),
+                "personalized": bool(stats.get("personalized")),
             }), db.dumps(stats), message),
         )
         for rank, s in enumerate(chosen, start=1):

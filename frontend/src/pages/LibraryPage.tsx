@@ -1,4 +1,4 @@
-import { Archive, CalendarDays, Search, Star } from "lucide-react";
+import { Archive, CalendarDays, Download, NotebookPen, Search, Star } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useHistory, useLibrary, usePaperState } from "../api/hooks";
@@ -10,7 +10,7 @@ import { cn } from "../lib/cn";
 import { SOURCE_LABEL, authorsShort, dayLabel, relativeDay } from "../lib/format";
 import { MathText } from "../lib/math";
 
-type Filter = "history" | "all" | "starred" | "unread" | "analyzed" | "dismissed";
+type Filter = "history" | "all" | "starred" | "noted" | "unread" | "analyzed" | "dismissed";
 
 function Row({ paper, score, direction, ai, titleZh }: { paper: PaperCard; score?: number; direction?: string; ai: AiStatusSummary; titleZh?: string }) {
   const setState = usePaperState(paper.id);
@@ -33,6 +33,14 @@ function Row({ paper, score, direction, ai, titleZh }: { paper: PaperCard; score
           <span className="hidden max-w-[260px] truncate sm:inline">{authorsShort(paper.authors, paper.author_count, 2)}</span>
           <AiBadges s={ai} className="ml-1" />
         </div>
+        {paper.state.note?.trim() && (
+          <div className="mt-1.5 flex items-start gap-1.5 text-[13px] text-text-2">
+            <NotebookPen className="mt-[3px] size-3.5 shrink-0 text-text-3" />
+            <span className="line-clamp-1">
+              <MathText text={paper.state.note.trim()} />
+            </span>
+          </div>
+        )}
       </div>
       <div className="relative z-10 flex shrink-0 items-center gap-2">
         <button
@@ -92,20 +100,29 @@ function ListView({ filter, q }: { filter: Exclude<Filter, "history">; q: string
     const map: Record<string, { t: string; d: string }> = {
       all: { t: "论文库是空的", d: "推荐过的论文会自动保存在这里。" },
       starred: { t: "还没有收藏的论文", d: "在论文卡片或详情页点击星标即可收藏。" },
+      noted: { t: "还没有写过笔记", d: "在论文详情页「概览」中的「我的笔记」记录想法，会出现在这里。" },
       unread: { t: "全部读完了", d: "没有未读的论文。" },
       analyzed: { t: "还没有 AI 分析过的论文", d: "在论文详情页使用翻译、总结等功能后会出现在这里。" },
       dismissed: { t: "没有隐藏的论文", d: "标记为「不感兴趣」的论文会出现在这里，可以随时恢复。" },
     };
-    const m = q ? { t: "没有找到匹配的论文", d: `没有标题、摘要或作者包含「${q}」的论文。` } : map[filter];
+    const m = q ? { t: "没有找到匹配的论文", d: `没有标题、摘要、作者或笔记包含「${q}」的论文。` } : map[filter];
     return (
       <Card>
-        <EmptyState icon={filter === "starred" ? <Star className="size-6" /> : <Archive className="size-6" />} title={m.t} description={m.d} />
+        <EmptyState icon={filter === "starred" ? <Star className="size-6" /> : filter === "noted" ? <NotebookPen className="size-6" /> : <Archive className="size-6" />}
+          title={m.t} description={m.d} />
       </Card>
     );
   }
   return (
     <div>
-      <div className="mb-2.5 px-1 text-xs text-text-3">共 {data.total} 篇</div>
+      <div className="mb-2 flex items-center justify-between px-1">
+        <span className="text-xs text-text-3">共 {data.total} 篇</span>
+        <a href={`/api/library/bibtex?${new URLSearchParams({ filter, q })}`}>
+          <Button size="xs" variant="ghost" icon={<Download className="size-3.5" />}>
+            导出 BibTeX
+          </Button>
+        </a>
+      </div>
       <Card className="divide-y divide-border overflow-hidden">
         {data.items.map((it) => (
           <Row key={it.paper.id} paper={it.paper} score={it.recommendation?.score} direction={it.recommendation?.direction_name} ai={it.ai_status}
@@ -143,7 +160,7 @@ export default function LibraryPage() {
         </div>
         <div className="relative w-full sm:w-72">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-text-3" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索标题、摘要、作者…" className="pl-9" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜索标题、摘要、作者、笔记…" className="pl-9" />
         </div>
       </div>
       <div className="mb-5 overflow-x-auto">
@@ -154,6 +171,7 @@ export default function LibraryPage() {
             { value: "history", label: "按日期" },
             { value: "all", label: "全部" },
             { value: "starred", label: "收藏" },
+            { value: "noted", label: "有笔记" },
             { value: "unread", label: "未读" },
             { value: "analyzed", label: "已分析" },
             { value: "dismissed", label: "已隐藏" },

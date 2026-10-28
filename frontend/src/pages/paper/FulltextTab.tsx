@@ -25,6 +25,7 @@ import { isActive, useAiLabel, useFulltext, useJob, useSettings, useTranslateReq
 import type { Block, FullDoc, FulltextResponse, Job, PaperDetail, Section } from "../../api/types";
 import { Dialog, MenuItem, Popover, Tooltip, useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Notice, ProgressBar, Segmented, Skeleton } from "../../components/ui/primitives";
+import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { MathBlock, MathText, plainText } from "../../lib/math";
 import { estimateTokens, useAiRunner } from "./AiPanel";
@@ -211,12 +212,8 @@ function SectionView({
       if (b.type === "paragraph" || b.type === "heading") parts.push(tr[b.id]?.text ?? b.text);
       if (b.type === "list") b.items.forEach((it, i) => parts.push("• " + (tr[`${b.id}::${i}`]?.text ?? it)));
     }
-    try {
-      await navigator.clipboard.writeText(plainText(`${titleZh ?? s.title}\n\n${parts.join("\n\n")}`));
-      toast({ tone: "success", title: "已复制本节内容" });
-    } catch {
-      toast({ tone: "error", title: "复制失败", description: "浏览器不允许访问剪贴板" });
-    }
+    if (await copyText(plainText(`${titleZh ?? s.title}\n\n${parts.join("\n\n")}`))) toast({ tone: "success", title: "已复制本节内容" });
+    else toast({ tone: "error", title: "复制失败", description: "无法访问剪贴板" });
   };
   return (
     <section id={`sec-${s.id}`} data-sid={s.id} className="scroll-mt-36">

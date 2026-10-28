@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .. import db, directions as dirs, secrets_store, settings_store
+from .. import __version__, db, directions as dirs, secrets_store, settings_store
 from ..ai import prompts
 from ..ai import client as ai_client
 from ..ai.client import DEFAULT_MODELS, GEMINI_DEFAULT_MODELS, PROVIDERS, AIError, get_client, is_configured
@@ -33,6 +33,7 @@ def patch_settings(patch: dict[str, Any]):
 @router.get("/meta")
 def meta():
     return {
+        "version": __version__,
         "direction_presets": dirs.PRESETS,
         "arxiv_categories": dirs.ARXIV_CATEGORIES,
         "ranking_presets": settings_store.RANKING_PRESETS,

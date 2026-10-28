@@ -12,14 +12,17 @@ import {
   LayoutGrid,
   MoreHorizontal,
   NotebookText,
+  Quote,
   Star,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { api, errorMessage } from "../api/client";
 import { usePaper, usePaperState } from "../api/hooks";
 import type { FeatureState } from "../api/types";
 import { MenuItem, Popover, useToast } from "../components/ui/overlay";
 import { Badge, Button, Card, EmptyState, Skeleton } from "../components/ui/primitives";
+import { copyText } from "../lib/clipboard";
 import { cn } from "../lib/cn";
 import { authorsShort, longDate } from "../lib/format";
 import { MathText, plainText } from "../lib/math";
@@ -118,13 +121,13 @@ export default function PaperPage() {
     { key: "contributions", label: "创新点", icon: <Lightbulb className="size-4" />, st: data.ai.contributions },
   ];
 
-  const copyCitation = async () => {
-    const text = `${p.authors.slice(0, 6).join(", ")}${p.authors.length > 6 ? " et al." : ""}. ${plainText(p.title)}. ${p.venue ?? (p.arxiv_id ? `arXiv:${p.arxiv_id}` : "")}, ${p.published?.slice(0, 4) ?? ""}. ${p.url ?? ""}`;
+  const copyCitation = async (format: "bibtex" | "gbt7714") => {
     try {
-      await navigator.clipboard.writeText(text);
-      toast({ tone: "success", title: "已复制引用信息" });
-    } catch {
-      toast({ tone: "error", title: "复制失败" });
+      const c = await api.get<{ bibtex: string; gbt7714: string }>(`/papers/${p.id}/cite`);
+      if (await copyText(c[format])) toast({ tone: "success", title: format === "bibtex" ? "已复制 BibTeX" : "已复制 GB/T 7714 格式引用" });
+      else toast({ tone: "error", title: "复制失败", description: "无法访问剪贴板" });
+    } catch (e) {
+      toast({ tone: "error", title: "复制失败", description: errorMessage(e) });
     }
   };
 
@@ -165,11 +168,14 @@ export default function PaperPage() {
             >
               {(close) => (
                 <>
-                  <MenuItem icon={<Copy className="size-4" />} onClick={() => { close(); copyCitation(); }}>
-                    复制引用信息
+                  <MenuItem icon={<Copy className="size-4" />} onClick={() => { close(); copyCitation("bibtex"); }}>
+                    复制 BibTeX
+                  </MenuItem>
+                  <MenuItem icon={<Quote className="size-4" />} onClick={() => { close(); copyCitation("gbt7714"); }}>
+                    复制引用（GB/T 7714）
                   </MenuItem>
                   <a href={`/api/papers/${p.id}/export?type=analysis`} onClick={close}>
-                    <MenuItem icon={<Download className="size-4" />}>导出 AI 分析（Markdown）</MenuItem>
+                    <MenuItem icon={<Download className="size-4" />}>导出笔记与 AI 分析</MenuItem>
                   </a>
                   <div className="my-1 border-t border-border" />
                   <MenuItem

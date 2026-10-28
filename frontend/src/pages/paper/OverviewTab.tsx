@@ -9,6 +9,7 @@ import { cn } from "../../lib/cn";
 import { SOURCE_LABEL, localDay, longDate, relativeDay } from "../../lib/format";
 import { MathText } from "../../lib/math";
 import { useAiRunner } from "./AiPanel";
+import { NoteCard } from "./NoteCard";
 
 type Tab = "overview" | "fulltext" | "summary" | "modules" | "contributions";
 
@@ -140,6 +141,8 @@ export function OverviewTab({ detail, go }: { detail: PaperDetail; go: (t: Tab, 
             </div>
           </Card>
         )}
+
+        <NoteCard key={p.id} paperId={p.id} note={detail.state.note} />
 
         {/* AI toolbox */}
         <div>

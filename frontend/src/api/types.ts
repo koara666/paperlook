@@ -163,6 +163,8 @@ export interface SourceStat {
   name: string;
   fetched: number;
   errors: string[];
+  /** arXiv refused: papers fetched through another source instead. */
+  fallback?: { via: string; fetched: number };
 }
 
 export interface Batch {

@@ -1,8 +1,11 @@
 # 项目状态
 
-- **当前阶段**：v1.2.0（反馈偏好排序、阅读笔记、引用导出；Windows 桌面应用 + Gemini + SemVer/CI/CD）；仓库 <https://github.com/koara666/paperlook>（MIT），Release 由 GitHub Actions 自动发布。
+- **当前阶段**：v1.2.1（反馈偏好排序、阅读笔记、引用导出；Windows 桌面应用 + Gemini + SemVer/CI/CD）；仓库 <https://github.com/koara666/paperlook>（MIT），Release 由 GitHub Actions 自动发布。
 - **最近更新**：2026-10-28
 - **运行状态**：安装版 `PaperLook.exe` 与源码版 `start.bat` 均在 Windows 11 实测启动正常。
+
+### 2026-10-28 更新（v1.2.1）
+- **arXiv 限流**：用户获取推荐时 arXiv 返回 429（只取到 101 篇），且不完整的候选池被缓存 2 小时。查明这是 arXiv 2026 年普遍的按 IP 限流（Google Frontend「Rate exceeded」，无 Retry-After；开发机实测完全空闲时也被拒），与测试用量无关。改为：每方向 1 次请求、429 只重试 1 次、失败时经 OpenAlex 补充 arXiv 论文、不完整候选池只沿用 10 分钟、提示去掉「每日额度」。真实网络验证（arXiv 被限流时）：10 秒内完成，经 OpenAlex 补充 252 篇 arXiv 论文（日期 10-21 ~ 10-26，最近两天尚未被收录）。
 
 ### 2026-10-28 更新（v1.2.0）
 - **自查后的迭代**（用户不再提需求，由 Agent 自行评估改进点）：实际使用快照数据逐页检查后选定——① 修复侧边栏版本号写死「v1.0」、模块协作流程的自环箭头；② 阅读笔记（`paper_state.note` 早已预留）；③ 引用导出（`cite.py`：BibTeX、GB/T 7714；论文库按当前筛选导出 .bib）；④ 根据用户反馈调整排序（`recommend/feedback.py`）。
@@ -89,14 +92,21 @@
 4. 安装包没有代码签名，首次运行会出现 SmartScreen 提示；首次启动因安全扫描约 20 秒，之后约 4 秒。
 5. Inno Setup 安装包只在 GitHub Actions 中构建（本机未安装 Inno Setup）；PyInstaller 打包与 exe 冒烟测试在本机和 CI 都会运行。
 6. 安装版与源码版数据目录不同，不会自动迁移（用备份导出/导入；Key 共用）。
-7. Semantic Scholar 匿名访问基本都会 429（已在 UI 提示需填 Key）；有 Key 时的成功路径未实测。
+7. Semantic Scholar 匿名访问基本都会 429（已在 UI 提示需填 Key）；有 Key 时的成功路径未实测。arXiv 接口也常按 IP 限流（2026），此时经 OpenAlex 补充，但最近一两天的新论文会缺少。
 8. OpenAlex 无 Key 时与同 IP 用户共享每日 $0.1 额度（约 100 次检索），超额时该来源失败但不影响其他来源。
 9. PDF 解析（PyMuPDF4LLM 版面分析模式）较慢：20 页约 30 秒；公式无法还原为 LaTeX（以原文本显示并标注、不翻译）；图片不显示。arXiv HTML 来源无这些问题。
 10. arXiv 周末/节假日不发布新论文，「最近 1 天」常为空（UI 会提示扩大范围）。
 11. 期刊/会议质量依据来自内置列表（`recommend/venues.py`）与 OpenAlex 统计，覆盖以 CS 为主；其他领域主要依赖 OpenAlex 统计。
 12. 前端 JS 包约 740 KB（含 KaTeX），本地加载无感，未做代码分割。
 
-## 最近一次测试结果（2026-10-28，v1.2.0）
+## 最近一次测试结果（2026-10-28，v1.2.1）
+
+| 测试 | 结果 |
+| --- | --- |
+| `pytest backend/tests` | **73 passed**（新增 429 重试与短缓存 4 项、arXiv 回退 2 项） |
+| arXiv 被限流时的真实检索 | arXiv 429 → 10 秒内放弃 → OpenAlex 补充 252 篇 arXiv 论文；OpenAlex 与 arXiv v1 日期对照 21/21 一致 |
+
+## v1.2.0 测试结果（2026-10-28）
 
 | 测试 | 结果 |
 | --- | --- |

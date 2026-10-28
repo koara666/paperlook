@@ -1,6 +1,8 @@
 """OpenAlex: open catalogue of journal and conference papers with citation counts and venue statistics.
 Works without a key (small shared daily budget per IP); a free key raises the budget 10x.
-We exclude repository records (arXiv etc.) because arXiv is queried directly."""
+We exclude repository records (arXiv etc.) because arXiv is queried directly, except as a fallback when the
+arXiv API refuses us (arxiv_only=True): OpenAlex's dates for arXiv works match arXiv v1 dates, but it indexes
+new arXiv papers only after a few days."""
 from __future__ import annotations
 
 import re
@@ -12,6 +14,7 @@ from ..textutil import collapse_ws
 from .base import RateLimiter, RawPaper, Source, SourceError, SourceQuery, clean_doi, code_signals, find_arxiv_id, get_with_retry, parse_date
 
 API = "https://api.openalex.org"
+ARXIV_SOURCE = "S4306400194"  # "arXiv (Cornell University)"
 limiter = RateLimiter(0.2)
 SELECT = ",".join([
     "id", "doi", "title", "publication_date", "primary_location", "best_oa_location", "authorships",
@@ -68,6 +71,12 @@ def parse_work(w: dict[str, Any], today: date) -> RawPaper | None:
     abstract = rebuild_abstract(w.get("abstract_inverted_index"))
     oa_id = (w.get("id") or "").rsplit("/", 1)[-1]
     signals: dict[str, Any] = {"citations": w.get("cited_by_count") or 0}
+    on_arxiv = (src.get("id") or "").endswith("/" + ARXIV_SOURCE)
+    if on_arxiv:
+        # An arXiv preprint (fallback search): arXiv is not a venue, so no venue name or venue statistics.
+        src = {}
+        if published and quality == "exact":
+            note = "arXiv 首次发布日期（来自 OpenAlex）"
     if src.get("id"):
         signals["openalex_source_id"] = src["id"].rsplit("/", 1)[-1]
         signals["venue_type"] = src.get("type")
@@ -92,8 +101,10 @@ def parse_work(w: dict[str, Any], today: date) -> RawPaper | None:
         arxiv_id=arxiv_id,
         openalex_id=oa_id,
         pmid=((w.get("ids") or {}).get("pmid") or "").rsplit("/", 1)[-1] or None,
-        url=(f"https://doi.org/{doi}" if doi else pl.get("landing_page_url")) or w.get("id"),
-        pdf_url=oa.get("pdf_url"),
+        url=f"https://arxiv.org/abs/{arxiv_id}" if on_arxiv and arxiv_id
+        else (f"https://doi.org/{doi}" if doi else pl.get("landing_page_url")) or w.get("id"),
+        pdf_url=f"https://arxiv.org/pdf/{arxiv_id}" if on_arxiv and arxiv_id else oa.get("pdf_url"),
+        html_url=f"https://arxiv.org/html/{arxiv_id}" if on_arxiv and arxiv_id else None,
         categories=[topic] if topic else [],
         signals=signals,
     )
@@ -110,7 +121,7 @@ class OpenAlexSource(Source):
     default_enabled = True
     coverage = "期刊与会议 · 全学科"
 
-    def search(self, q: SourceQuery) -> list[RawPaper]:
+    def search(self, q: SourceQuery, arxiv_only: bool = False) -> list[RawPaper]:
         if not q.keywords:
             return []  # OpenAlex has no arXiv-style categories; keyword-less directions are arXiv-only.
         today = date.today()
@@ -118,7 +129,7 @@ class OpenAlexSource(Source):
             f"title_and_abstract.search:{_search_expr(q.keywords)}",
             f"from_publication_date:{q.date_from.isoformat()}",
             f"to_publication_date:{min(q.date_to, today).isoformat()}",
-            "primary_location.source.type:!repository",
+            f"primary_location.source.id:{ARXIV_SOURCE}" if arxiv_only else "primary_location.source.type:!repository",
             "type:article|preprint|review|book-chapter",
         ]
         params = {

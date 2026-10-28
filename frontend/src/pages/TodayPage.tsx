@@ -335,6 +335,7 @@ function BatchNotice({ batch, onWiden }: { batch: Batch; onWiden: (d: number) =>
             <li key={s.name}>
               {s.name}：{s.errors[0]}
               {s.fetched > 0 && `（仍获取到 ${s.fetched} 篇）`}
+              {s.fallback && s.fallback.fetched > 0 && `；已通过 ${s.fallback.via} 补充 ${s.fallback.fetched} 篇 arXiv 论文`}
             </li>
           ))}
         </ul>

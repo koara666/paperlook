@@ -114,7 +114,8 @@ class ArxivSource(Source):
     def search(self, q: SourceQuery) -> list[RawPaper]:
         query = build_query(q)
         out: list[RawPaper] = []
-        page_size = 100
+        # One request per direction for the usual 200 results: arXiv throttles by request count per IP.
+        page_size = 200
         start = 0
         while start < q.max_results:
             params = {
@@ -125,7 +126,15 @@ class ArxivSource(Source):
                 "sortBy": "relevance",
                 "sortOrder": "descending",
             }
-            resp = get_with_retry(API_URL, params=params, source_name="arXiv", limiter=limiter, timeout=60)
+            try:
+                # A throttled IP stays blocked well beyond a short retry window (and each refusal takes ~15 s),
+                # so retry once; the engine then falls back to arXiv papers indexed by OpenAlex.
+                resp = get_with_retry(API_URL, params=params, source_name="arXiv", limiter=limiter, timeout=90,
+                                      attempts=2, backoff_429=5.0)
+            except SourceError as e:
+                if "429" in e.message:
+                    raise SourceError("arXiv 暂时限制了访问频率（HTTP 429），稍后获取推荐时会自动重试") from None
+                raise
             papers, total = parse_feed(resp.text)
             out.extend(papers)
             start += page_size

@@ -133,9 +133,19 @@ class RateLimiter:
             self._last = time.monotonic()
 
 
+def _retry_after(resp: httpx.Response) -> float | None:
+    try:
+        return max(0.0, float(resp.headers.get("retry-after", "")))
+    except ValueError:
+        return None
+
+
 def get_with_retry(url: str, *, params: Any = None, headers: dict | None = None, source_name: str,
-                   limiter: RateLimiter | None = None, attempts: int = 3, timeout: float | None = None) -> httpx.Response:
+                   limiter: RateLimiter | None = None, attempts: int = 3, timeout: float | None = None,
+                   backoff_429: float = 2.0) -> httpx.Response:
+    """GET with retries. A 429 waits the server's Retry-After (capped at 60 s) or backoff_429 × attempt."""
     last_exc: Exception | None = None
+    wait = 0.0
     for attempt in range(attempts):
         if limiter:
             limiter.wait()
@@ -152,7 +162,10 @@ def get_with_retry(url: str, *, params: Any = None, headers: dict | None = None,
             log.info("%s network error (attempt %d): %s", source_name, attempt + 1, e)
         else:
             if resp.status_code == 429:
-                last_exc = SourceError(f"{source_name} 请求过于频繁（429），已达到访问频率或每日额度限制")
+                last_exc = SourceError(f"{source_name} 限制了访问频率（HTTP 429）")
+                ra = _retry_after(resp)
+                wait = min(ra, 60.0) if ra is not None else backoff_429 * (attempt + 1)
+                log.info("%s 429 (attempt %d), waiting %.0fs", source_name, attempt + 1, wait)
             elif resp.status_code >= 500:
                 last_exc = SourceError(f"{source_name} 服务暂时不可用（HTTP {resp.status_code}）")
             elif resp.status_code >= 400:
@@ -160,7 +173,8 @@ def get_with_retry(url: str, *, params: Any = None, headers: dict | None = None,
             else:
                 return resp
         if attempt < attempts - 1:
-            time.sleep(2.0 * (attempt + 1))
+            time.sleep(wait or 2.0 * (attempt + 1))
+            wait = 0.0
     assert last_exc is not None
     raise last_exc
 

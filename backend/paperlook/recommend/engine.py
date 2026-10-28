@@ -23,6 +23,8 @@ log = logging.getLogger(__name__)
 
 PER_DIRECTION_MAX = {"arxiv": 200, "openalex": 100, "semantic_scholar": 150, "pubmed": 100}
 POOL_MAX_AGE = 2 * 3600
+# A pool where some source failed (e.g. arXiv 429) is reused only briefly, so the next run retries that source.
+PARTIAL_POOL_MAX_AGE = 10 * 60
 
 
 def local_today() -> date:
@@ -71,8 +73,30 @@ def _fetch_pool(job: Job, dirs: list[dict], sources: list[str], date_from: date,
             uniq = list(dict.fromkeys(errors))
             source_stats[sid] = {"name": REGISTRY[sid].name, "fetched": len(found), "errors": uniq}
     job.check_cancelled()
+    raw.extend(_arxiv_fallback(job, dirs, sources, source_stats, date_from, today))
     merged = dedupe.merge(raw)
     return merged, source_stats
+
+
+def _arxiv_fallback(job: Job, dirs: list[dict], sources: list[str], source_stats: dict, date_from: date,
+                    today: date) -> list[RawPaper]:
+    """The arXiv API often throttles whole IPs (HTTP 429, 2026). Then fetch arXiv papers through OpenAlex,
+    which indexes them with the same v1 dates (but a few days late), so a refused arXiv still yields papers."""
+    ax = source_stats.get("arxiv")
+    if not ax or not ax["errors"] or "openalex" not in sources or job.cancelled:
+        return []
+    job.update(message="arXiv 暂时无法访问，正在通过 OpenAlex 补充 arXiv 论文…", force=True)
+    found: list[RawPaper] = []
+    for d in dirs:
+        q = SourceQuery(keywords=d["keywords"], exclude=d["exclude"], categories=d["categories"],
+                        date_from=date_from, date_to=today, max_results=100)
+        try:
+            found.extend(REGISTRY["openalex"].search(q, arxiv_only=True))  # type: ignore[call-arg]
+        except SourceError as e:
+            log.info("arXiv fallback via OpenAlex failed: %s", e.message)
+            break
+    ax["fallback"] = {"via": "OpenAlex", "fetched": len(found)}
+    return found
 
 
 def run(job: Job, mode: str = "today", refresh: bool = False) -> dict[str, Any]:
@@ -91,6 +115,8 @@ def run(job: Job, mode: str = "today", refresh: bool = False) -> dict[str, Any]:
 
     pool_key = _pool_key(dirs, sources, window, today)
     cached = None if refresh else db.cache_get(pool_key, max_age_seconds=POOL_MAX_AGE)
+    if cached and cached.get("partial"):
+        cached = db.cache_get(pool_key, max_age_seconds=PARTIAL_POOL_MAX_AGE)
     if cached:
         merged, source_stats = cached["papers"], cached["source_stats"]
         job.update(total=3, progress=0, message="使用最近一次检索结果…", force=True)
@@ -101,7 +127,8 @@ def run(job: Job, mode: str = "today", refresh: bool = False) -> dict[str, Any]:
             errs = [e for s in source_stats.values() for e in s["errors"]]
             if errs:
                 raise AppError("所有论文来源都请求失败：" + "；".join(errs[:3]), code="sources_failed")
-        db.cache_set(pool_key, {"papers": merged, "source_stats": source_stats})
+        db.cache_set(pool_key, {"papers": merged, "source_stats": source_stats,
+                                "partial": any(s["errors"] for s in source_stats.values())})
 
     stats: dict[str, Any] = {"sources": source_stats, "merged": len(merged)}
 

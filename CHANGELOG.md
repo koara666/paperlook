@@ -10,6 +10,14 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 
 ## [未发布]
 
+## [1.2.1] - 2026-10-28
+
+### 修复
+- **arXiv 拒绝访问（HTTP 429）时不再只剩很少的论文**：arXiv 在 2026 年经常按 IP 限制访问，这时会自动通过 OpenAlex 补充 arXiv 论文（发布日期与 arXiv 首版一致；OpenAlex 收录新论文要晚几天，所以最近一两天的论文可能缺少）。推荐页会显示「已通过 OpenAlex 补充 N 篇 arXiv 论文」。
+- 有来源失败时，这次的检索结果只沿用 10 分钟（之前 2 小时），之后获取推荐会重新尝试失败的来源。
+- 每个研究方向的 arXiv 检索从 2 次请求减为 1 次；被限流时按服务器要求的时间等待，并且不再长时间重复尝试。
+- 限流提示不再写「每日额度」（arXiv 没有每日额度）。
+
 ## [1.2.0] - 2026-10-28
 
 ### 新增
@@ -70,7 +78,8 @@ PaperLook 是桌面应用而不是代码库，「版本号」对用户的含义�
 - 论文库、收藏/已读/隐藏、备份导出与导入、深色模式、手机宽度适配。
 - `start.bat` 一键启动（自动创建环境、国内镜像兜底）。
 
-[未发布]: https://github.com/koara666/paperlook/compare/v1.2.0...HEAD
+[未发布]: https://github.com/koara666/paperlook/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/koara666/paperlook/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/koara666/paperlook/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/koara666/paperlook/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/koara666/paperlook/compare/v1.0.0...v1.1.0

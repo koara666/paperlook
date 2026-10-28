@@ -63,10 +63,10 @@
 
 1. 读取启用的方向与来源；检索时间窗口 `[今天 - N 天, 今天]`。
 2. **检索**：各来源并行、来源内按方向串行（arXiv 遵守 3 秒/请求）。每个方向自动生成查询：
-   - arXiv：`(cat:A OR cat:B) AND (ti:"kw" OR abs:"kw" …) AND submittedDate:[…]`，按相关度取前 200。
-   - OpenAlex：`title_and_abstract.search:"kw" OR …`，过滤发布日期、排除 repository（arXiv 已直接检索）。
+   - arXiv：`(cat:A OR cat:B) AND (ti:"kw" OR abs:"kw" …) AND submittedDate:[…]`，按相关度取前 200（一次请求）。arXiv 自 2026 年常按 IP 返回 429「Rate exceeded」（无 Retry-After，封禁远长于重试窗口）：只重试 1 次，之后由 `engine._arxiv_fallback` 通过 OpenAlex 检索 arXiv 论文（`primary_location.source.id:S4306400194`；日期与 arXiv v1 一致——实测 21/21，但新论文要晚几天才被收录；不当作期刊，不计期刊统计），`source_stats.arxiv.fallback` 记录补充数量。
+   - OpenAlex：`title_and_abstract.search:"kw" OR …`，过滤发布日期、排除 repository（arXiv 已直接检索；只在 arXiv 失败时用于补充）。
    - Semantic Scholar（bulk search，布尔查询）/ PubMed（esearch + efetch）。
-   - 候选池缓存 2 小时（`kv_cache` 的 `pool:*`），「再推荐几篇」无需重新检索。
+   - 候选池缓存 2 小时（`kv_cache` 的 `pool:*`），「再推荐几篇」无需重新检索；有来源失败的候选池（`partial`）只沿用 10 分钟。
 3. **去重合并**（dedupe）：arXiv ID / DOI（含 10.48550/arxiv.*）/ PMID / 规范化标题；优先 arXiv 的标题摘要，补齐期刊、DOI、引用等；发布日期取各来源中**最早的精确日期**。
 4. **时间过滤**：只保留发布日期在窗口内且日期可靠（exact/approx）的论文；日期未知的排除并计数。
 5. **去重复推荐**：已推荐或「不感兴趣」的论文（按身份键）永不再出现。

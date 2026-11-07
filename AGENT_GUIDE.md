@@ -71,6 +71,8 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 - 不要提交 `data/`、`.venv/`、`node_modules/`、任何 Key（见 `.gitignore`）。
 - 模型的 JSON 输出由 `client.parse_json` 读取，它会修正 Gemini 常见的错误（未转义的 LaTeX 反斜杠、用错的结束括号）；改动它时跑 `backend/tests/test_ai_json.py`，并确认正确的 JSON 读取结果不变。
 - 含反斜杠的文件内容（测试、提示词、LaTeX）用编辑工具写入，不要用 Git Bash 的 heredoc：`\\` 可能被折叠成 `\`。
+- 用 Python 脚本改文件时用 `write_bytes` 或 `open(..., newline="")`：Windows 上 `write_text` 会写成 CRLF，前端构建出的 `index.html` 就与 CI（LF）不一致，「前端构建」检查失败。
+- 测试按中文文案编写，`conftest.py` 把「跟随系统语言」固定为中文（CI 的系统是英文）；要测其他语言时在测试里用 `i18n.use(lang)` 或设置 `language`。
 - **用户可见文字不能写死在代码里**，四种语言都要写：
   - 前端：在 `frontend/src/i18n/zh.ts` 加键，`en.ts` / `ja.ts` / `ko.ts` 必须有同样的键（类型检查会报错）；组件里用 `const t = useT()` 后 `t("key", {param})`，带链接/加粗的句子用 `rich()`；日期数字用 `lib/format.ts`（Intl）。
   - 后端：在 `i18n_catalog.py` 加 `(zh, en, ja, ko)`；直接返回的文字用 `t("key", **p)`；**要存进数据库、以后再显示的文字**（推荐理由、质量标签、任务进度、批次提示）用 `msg("key", **p)`，返回前端时 `render()`。英文复数写 `"one|other"`（按 `n` / `window` / `found` 参数选择）。

@@ -6,12 +6,12 @@ from typing import Any
 
 from . import db
 from .recommend.dedupe import identity_keys
-from .textutil import title_key
+from .textutil import detect_language, key_weight, title_key
 
 JSON_FIELDS = {"authors": [], "categories": [], "sources": [], "signals": {}}
 COLUMNS = ["title", "title_norm", "abstract", "authors", "published", "date_quality", "date_note", "updated", "venue",
            "doi", "arxiv_id", "openalex_id", "s2_id", "pmid", "url", "pdf_url", "html_url", "categories", "comment",
-           "journal_ref", "sources", "signals"]
+           "journal_ref", "sources", "signals", "language"]
 
 
 def make_id(p: dict[str, Any]) -> str:
@@ -24,6 +24,8 @@ def _decode(row: dict[str, Any]) -> dict[str, Any]:
     out = dict(row)
     for f, default in JSON_FIELDS.items():
         out[f] = db.loads(out.get(f), default)
+    if not out.get("language") and out.get("title"):  # papers saved before 1.3
+        out["language"] = detect_language(f"{out['title']} {out.get('abstract') or ''}", title=out["title"])
     return out
 
 
@@ -33,7 +35,7 @@ def find_existing(p: dict[str, Any]) -> str | None:
     for col, val in checks:
         if not val:
             continue
-        if col == "title_norm" and len(val) < 24:
+        if col == "title_norm" and key_weight(val) < 24:
             continue
         r = db.query_one(f"SELECT id FROM papers WHERE {col} = ? LIMIT 1", (val,))
         if r:
@@ -134,6 +136,7 @@ def card(p: dict[str, Any], state: dict[str, Any] | None = None) -> dict[str, An
         "id": p["id"], "title": p["title"], "authors": p["authors"][:8], "author_count": len(p["authors"]),
         "abstract": p.get("abstract"), "published": p.get("published"), "date_quality": p.get("date_quality"),
         "venue": p.get("venue"), "arxiv_id": p.get("arxiv_id"), "doi": p.get("doi"), "url": p.get("url"),
+        "language": p.get("language"),
         "pdf_url": p.get("pdf_url"), "categories": p.get("categories")[:4],
         "sources": [s["source"] for s in p.get("sources", [])],
         "state": state if state is not None else get_state(p["id"]),

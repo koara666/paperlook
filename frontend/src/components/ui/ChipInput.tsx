@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
+import { t as tr } from "../../i18n";
 import { cn } from "../../lib/cn";
 
 /** Keyword editor: type and press Enter / comma to add; Backspace removes the last chip. */
@@ -20,7 +21,7 @@ export function ChipInput({
 
   const add = (raw: string) => {
     const parts = raw
-      .split(/[,，;；\n]/)
+      .split(/[,，、;；\n]/)
       .map((s) => s.trim())
       .filter(Boolean);
     if (!parts.length) return;
@@ -33,7 +34,7 @@ export function ChipInput({
   };
 
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === "," || e.key === "，") {
+    if (e.key === "Enter" || e.key === "," || e.key === "，" || e.key === "、") {
       e.preventDefault();
       add(text);
     } else if (e.key === "Backspace" && !text && value.length) {
@@ -56,7 +57,7 @@ export function ChipInput({
             type="button"
             onClick={() => onChange(value.filter((x) => x !== v))}
             className="rounded p-0.5 opacity-60 hover:opacity-100"
-            aria-label={`删除 ${v}`}
+            aria-label={tr("chip.remove", { v })}
           >
             <X className="size-3" />
           </button>
@@ -69,7 +70,7 @@ export function ChipInput({
         onBlur={() => text && add(text)}
         onPaste={(e) => {
           const t = e.clipboardData.getData("text");
-          if (/[,，;\n]/.test(t)) {
+          if (/[,，、;\n]/.test(t)) {
             e.preventDefault();
             add(t);
           }

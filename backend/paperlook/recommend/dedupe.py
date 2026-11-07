@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from ..sources import PRIORITY, RawPaper
-from ..textutil import title_key
+from ..textutil import detect_language, key_weight, title_key
 
 _ARXIV_DOI_PREFIX = "10.48550/arxiv."
 
@@ -43,7 +43,7 @@ def identity_keys(p: dict[str, Any] | RawPaper) -> list[str]:
     if get("pmid"):
         keys.append("pmid:" + str(get("pmid")))
     tk = title_key(get("title"))
-    if len(tk) >= 24:  # short titles ("Introduction") are too ambiguous to merge on
+    if key_weight(tk) >= 24:  # short titles ("Introduction") are too ambiguous to merge on
         keys.append("title:" + tk)
     return keys
 
@@ -93,6 +93,8 @@ def merge_group(group: list[RawPaper]) -> dict[str, Any]:
             elif k not in sig:
                 sig[k] = v
     out["published"], out["date_quality"], out["date_note"] = earliest_date(group)
+    hint = next((r.language for r in group if r.language), None)
+    out["language"] = detect_language(f"{out.get('title') or ''} {out.get('abstract') or ''}", hint, title=out.get("title"))
     return out
 
 
@@ -106,4 +108,4 @@ def earliest_date(group: list[RawPaper]) -> tuple[str | None, str, str | None]:
     if approx:
         r = min(approx, key=lambda x: x.published)
         return r.published.isoformat(), r.date_quality, r.date_note
-    return None, "unknown", "来源未提供可靠的发布日期"
+    return None, "unknown", "date.unknown"

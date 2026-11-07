@@ -2,7 +2,7 @@
 generateContent) used for end-to-end testing without spending real tokens or quota.
 
 Run:   python backend/tests/mock_deepseek.py [port]      (default 8790)
-Then in PaperLook: Settings -> AI 服务 -> 高级设置 -> 服务地址 = http://127.0.0.1:8790
+Then in PaperLook: Settings -> AI service -> Advanced -> Service address = http://127.0.0.1:8790
 (the same address works for both DeepSeek and Gemini).
 
 Error injection by API key:
@@ -15,7 +15,8 @@ Gemini keys (header x-goog-api-key):
   AIza-mock-rpm...      -> 429 per-minute (retryDelay 1s) on the first call, then OK
   AIza-mock-strict...   -> rejects systemInstruction and thinkingLevel "minimal" (tests fallbacks)
   anything else         -> success; models: gemini-3.5-flash-lite, gemini-3.8-flash
-Responses are deterministic and shaped like the real prompts' JSON schemas.
+Responses are deterministic and shaped like the real prompts' JSON schemas. Analyses are canned Chinese text;
+translations are the original prefixed with a language tag (【译】 for Chinese, [JA] / [KO] / [EN] otherwise).
 """
 from __future__ import annotations
 
@@ -58,7 +59,7 @@ async def balance(req: Request):
 def _summary():
     return {
         "tldr": "提出一个新的基准与分析方法（模拟输出），用于测试 PaperLook 的总结渲染。",
-        "paper_type": "数据集与基准",
+        "paper_type": "dataset",
         "problem": {"question": "现有方法在该任务上缺乏可靠评测。", "importance": "没有可靠评测就无法比较模型能力。"},
         "method": {"overview": "作者构建了数据集并设计评测协议。", "core_idea": "通过受控变量隔离关键因素，公式如 $x^2+y^2$。",
                    "relation_to_prior": "与已有基准相比覆盖更多模态。"},
@@ -77,11 +78,11 @@ def _modules():
         "applicable": True, "reason": "",
         "overview": "系统由编码器、对齐模块和评测器组成（模拟输出）。",
         "modules": [
-            {"name": "视觉编码器", "name_en": "Vision Encoder", "category": "特征提取", "role": "提取图像特征", "inputs": "图像",
+            {"name": "视觉编码器", "name_en": "Vision Encoder", "category": "feature_extraction", "role": "提取图像特征", "inputs": "图像",
              "outputs": "特征 $z$", "mechanism": "使用 ViT 将图像切分为 patch 并编码。", "key_formula": "z = f(x)", "novelty": "existing", "section": "3.1"},
-            {"name": "对齐模块", "name_en": "Alignment Module", "category": "核心算法", "role": "对齐不同模态", "inputs": "特征",
+            {"name": "对齐模块", "name_en": "Alignment Module", "category": "algorithm", "role": "对齐不同模态", "inputs": "特征",
              "outputs": "对齐分数", "mechanism": "计算互近邻重叠。", "key_formula": "S = \\frac{1}{N}\\sum_i |A_i \\cap B_i|", "novelty": "new", "section": "3.2"},
-            {"name": "评测器", "name_en": "Evaluator", "category": "评估方法", "role": "计算指标", "inputs": "对齐分数", "outputs": "相关系数",
+            {"name": "评测器", "name_en": "Evaluator", "category": "evaluation", "role": "计算指标", "inputs": "对齐分数", "outputs": "相关系数",
              "mechanism": "计算 Pearson 相关。", "key_formula": "", "novelty": "adapted", "section": "4"},
         ],
         "flow": [{"from": "视觉编码器", "to": "对齐模块", "description": "传递特征"}, {"from": "对齐模块", "to": "评测器", "description": "传递分数"}],
@@ -105,35 +106,49 @@ def _contributions(content: str):
     }
 
 
+_LANG_TAG = {"Simplified": "【译】", "Japanese": "[JA] ", "Korean": "[KO] ", "English": "[EN] "}
+
+
+def _tag(text: str) -> str:
+    """Translation prefix for the output language named in the prompt."""
+    m = re.search(r"(?:into accurate, fluent|All text in|renderings of academic terms|standard) (Simplified|Japanese|Korean|English)",
+                  text)
+    return _LANG_TAG.get(m.group(1) if m else "Simplified", "【译】")
+
+
 def _route(system: str, user: str) -> str:
     if "Reply with the single word" in user:
         return "OK"
-    if "学术论文翻译专家" in system:
-        payload = user.split("待翻译内容：\n", 1)[1]
+    if "expert translator of academic papers" in system:
+        payload = user.split("Items to translate:\n", 1)[1]
         items = json.loads(payload)["items"]
+        tag = _tag(system)
         out = []
         for it in items:
             # keep placeholders, prefix to make the translation visible
-            out.append({"id": it["id"], "text": f"【译】{it['text']}"})
+            out.append({"id": it["id"], "text": f"{tag}{it['text']}"})
         return json.dumps({"translations": out}, ensure_ascii=False)
-    if "提取 15-40 个" in user:
-        return json.dumps({"terms": [{"en": "vision-language model", "zh": "视觉-语言模型", "keep": False},
-                                     {"en": "Transformer", "zh": "Transformer", "keep": True}]}, ensure_ascii=False)
-    if "结构化总结" in user:
+    if "technical terms most important" in user:
+        return json.dumps({"terms": [{"src": "vision-language model", "tgt": "视觉-语言模型", "keep": False},
+                                     {"src": "Transformer", "tgt": "Transformer", "keep": True}]}, ensure_ascii=False)
+    if "Write a structured summary" in user:
         return json.dumps(_summary(), ensure_ascii=False)
-    if "关键技术模块" in user:
+    if "key technical modules" in user:
         return json.dumps(_modules(), ensure_ascii=False)
-    if "主要贡献与创新点" in user:
+    if "Extract the main contributions" in user:
         return json.dumps(_contributions(user), ensure_ascii=False)
-    if "abstract_zh" in system:
-        return json.dumps({"title_zh": "（模拟）论文中文标题", "abstract_zh": "这是模拟的摘要翻译，公式 $x$ 保留。"}, ensure_ascii=False)
-    if "候选论文" in user:
-        cands = json.loads(user.split("候选论文：\n", 1)[1])
+    if '"abstract": "..."' in system:
+        tag = _tag(system)
+        return json.dumps({"title": f"{tag}（模拟）论文标题", "abstract": f"{tag}这是模拟的摘要翻译，公式 $x$ 保留。"},
+                          ensure_ascii=False)
+    if "Candidates:\n" in user:
+        cands = json.loads(user.split("Candidates:\n", 1)[1])
         res = [{"i": c["i"], "relevance": 9 - (c["i"] % 5), "reason": "与研究方向高度相关（模拟）",
-                "title_zh": "（模拟中文标题）" + c["title"][:20], "tldr": "模拟的一句话概述"} for c in cands]
+                "title_tr": "（模拟标题）" + c["title"][:20], "tldr": "模拟的一句话概述"} for c in cands]
         return json.dumps({"results": res}, ensure_ascii=False)
-    if "订阅以下研究方向" in user:
-        return json.dumps({"keywords": ["graph neural network", "GNN", "message passing"], "exclude": [], "categories": ["cs.LG"]})
+    if "wants new papers on this research direction" in user:
+        return json.dumps({"keywords": ["graph neural network", "GNN", "message passing"], "exclude": [],
+                           "categories": ["cs.LG"], "fields": ["17"], "window_days": 7})
     return json.dumps({"note": "unhandled prompt"})
 
 

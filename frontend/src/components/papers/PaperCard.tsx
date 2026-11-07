@@ -1,21 +1,23 @@
-import { Award, Check, Code2, EyeOff, Flame, Languages, Layers, Lightbulb, NotebookText, Sparkles, Star } from "lucide-react";
+import { Award, BookMarked, Check, Code2, EyeOff, Flame, Languages, Layers, Lightbulb, NotebookText, Sparkles, Star } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { usePaperState } from "../../api/hooks";
 import type { AiStatusSummary, Breakdown, PaperCard as Card, RecAI } from "../../api/types";
+import { getLang, useT } from "../../i18n";
 import { cn } from "../../lib/cn";
-import { SOURCE_LABEL, authorsShort, relativeDay } from "../../lib/format";
+import { SOURCE_LABEL, authorsShort, languageName, relativeDay } from "../../lib/format";
 import { MathText } from "../../lib/math";
 import { useToast } from "../ui/overlay";
 import { Badge, IconButton } from "../ui/primitives";
 import { ScoreWithBreakdown } from "./Score";
 
 export function AiBadges({ s, className }: { s: AiStatusSummary; className?: string }) {
+  const t = useT();
   const items: { key: string; icon: ReactNode; label: string }[] = [];
-  if (s.summary) items.push({ key: "s", icon: <NotebookText className="size-3" />, label: "总结" });
-  if (s.modules) items.push({ key: "m", icon: <Layers className="size-3" />, label: "模块" });
-  if (s.contributions) items.push({ key: "c", icon: <Lightbulb className="size-3" />, label: "创新点" });
-  if (s.translation_units) items.push({ key: "t", icon: <Languages className="size-3" />, label: "已翻译" });
+  if (s.summary) items.push({ key: "s", icon: <NotebookText className="size-3" />, label: t("badge.summary") });
+  if (s.modules) items.push({ key: "m", icon: <Layers className="size-3" />, label: t("badge.modules") });
+  if (s.contributions) items.push({ key: "c", icon: <Lightbulb className="size-3" />, label: t("badge.contributions") });
+  if (s.translation_units) items.push({ key: "t", icon: <Languages className="size-3" />, label: t("badge.translated") });
   if (!items.length) return null;
   return (
     <div className={cn("flex flex-wrap items-center gap-1", className)}>
@@ -36,6 +38,16 @@ function signalIcon(key: string) {
   return <Award className="size-3" />;
 }
 
+/** Shown when a paper is written in a language other than English and the interface language. */
+export function LanguageTag({ code }: { code: string | null | undefined }) {
+  if (!code || code === "en" || code === getLang()) return null;
+  return (
+    <Badge tone="outline" icon={<Languages className="size-3" />}>
+      {languageName(code)}
+    </Badge>
+  );
+}
+
 export function PaperCardView({
   paper,
   score,
@@ -53,10 +65,16 @@ export function PaperCardView({
   aiStatus?: AiStatusSummary;
   index?: number;
 }) {
+  const t = useT();
   const setState = usePaperState(paper.id);
   const toast = useToast();
   const read = paper.state.read;
   const kws = breakdown ? [...breakdown.matched.title, ...breakdown.matched.abstract.filter((k) => !breakdown.matched.title.includes(k))] : [];
+  // badges are for positive evidence only; weak or negative signals stay in the score breakdown
+  const badges = (breakdown?.quality_signals ?? []).filter((s) => s.score >= 0.6).slice(0, 3);
+  // AI re-rank output is in the language that was active when it ran; only show it in that language.
+  const aiTitle = ai && (!ai.lang || ai.lang === getLang()) ? ai.title_tr || ai.title_zh : null;
+  const aiTldr = ai && (!ai.lang || ai.lang === getLang()) ? ai.tldr : null;
 
   const act = (e: React.MouseEvent, patch: Record<string, boolean>, msg?: string) => {
     e.preventDefault();
@@ -77,11 +95,13 @@ export function PaperCardView({
           {/* meta row */}
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-3">
             {direction && <Badge tone="accent">{direction}</Badge>}
+            {breakdown?.review && <Badge tone="success" icon={<BookMarked className="size-3" />}>{t("badge.survey")}</Badge>}
+            <LanguageTag code={paper.language} />
             <span>{paper.sources.map((s) => SOURCE_LABEL[s] ?? s).join(" · ")}</span>
             <span className="text-border-strong">/</span>
             <span title={paper.published ?? undefined}>
               {relativeDay(paper.published)}
-              {paper.date_quality === "approx" && "（约）"}
+              {paper.date_quality === "approx" && t("paper.approx")}
             </span>
             {paper.venue && (
               <>
@@ -97,18 +117,18 @@ export function PaperCardView({
               to={`/paper/${paper.id}`}
               className={cn("outline-none after:absolute after:inset-0 after:rounded-2xl", read ? "text-text-2" : "text-text")}
             >
-              {!read && <span className="mb-[3px] mr-2 inline-block size-2 rounded-full bg-accent align-middle" title="未读" />}
+              {!read && <span className="mb-[3px] mr-2 inline-block size-2 rounded-full bg-accent align-middle" title={t("paper.unread")} />}
               <MathText text={paper.title} />
             </Link>
           </h2>
-          {ai?.title_zh && <p className="mt-1 text-[14px] text-text-2">{ai.title_zh}</p>}
+          {aiTitle && aiTitle !== paper.title && <p className="mt-1 text-[14px] text-text-2">{aiTitle}</p>}
           <p className="mt-1.5 truncate text-[13px] text-text-3">{authorsShort(paper.authors, paper.author_count)}</p>
 
           {/* summary */}
-          {ai?.tldr ? (
+          {aiTldr ? (
             <p className="mt-2.5 flex gap-1.5 text-[14px] leading-relaxed text-text-2">
               <Sparkles className="mt-1 size-3.5 shrink-0 text-accent" />
-              <span>{ai.tldr}</span>
+              <span>{aiTldr}</span>
             </p>
           ) : (
             paper.abstract && (
@@ -119,17 +139,17 @@ export function PaperCardView({
           )}
 
           {/* why recommended */}
-          {(kws.length > 0 || breakdown?.quality_signals.length || ai?.reason) && (
+          {(kws.length > 0 || badges.length > 0) && (
             <div className="mt-3 flex flex-wrap items-center gap-1.5">
               {kws.slice(0, 4).map((k) => (
                 <span key={k} className="inline-flex h-[22px] items-center rounded-md border border-border px-1.5 text-xs text-text-2">
                   {k}
                 </span>
               ))}
-              {breakdown?.quality_signals.slice(0, 3).map((s) => (
-                <span key={s.key} className="inline-flex h-[22px] items-center gap-1 rounded-md bg-warning-soft px-1.5 text-xs text-warning">
+              {badges.map((s) => (
+                <span key={s.key} title={s.label} className="inline-flex h-[22px] max-w-full items-center gap-1 rounded-md bg-warning-soft px-1.5 text-xs text-warning">
                   {signalIcon(s.key)}
-                  {s.label.replace("作者注明：", "")}
+                  <span className="truncate">{s.short ?? s.label}</span>
                 </span>
               ))}
             </div>
@@ -147,14 +167,14 @@ export function PaperCardView({
       <div className="relative z-10 mt-3 flex items-center justify-between gap-2 border-t border-border pt-3">
         <AiBadges s={aiStatus ?? {}} />
         <div className="ml-auto flex items-center gap-0.5 opacity-100 transition-opacity sm:opacity-60 sm:group-hover:opacity-100">
-          <IconButton label={paper.state.starred ? "取消收藏" : "收藏"} active={paper.state.starred}
-            onClick={(e) => act(e, { starred: !paper.state.starred }, paper.state.starred ? undefined : "已加入收藏")}>
+          <IconButton label={paper.state.starred ? t("paper.unstar") : t("paper.star")} active={paper.state.starred}
+            onClick={(e) => act(e, { starred: !paper.state.starred }, paper.state.starred ? undefined : t("paper.starred_toast"))}>
             <Star className={cn("size-4", paper.state.starred && "fill-current text-[#e9a93a]")} />
           </IconButton>
-          <IconButton label={read ? "标为未读" : "标为已读"} active={read} onClick={(e) => act(e, { read: !read })}>
+          <IconButton label={read ? t("paper.mark_unread") : t("paper.mark_read")} active={read} onClick={(e) => act(e, { read: !read })}>
             <Check className="size-4" />
           </IconButton>
-          <IconButton label="不感兴趣（不再显示）" onClick={(e) => act(e, { dismissed: true }, "已隐藏，可在论文库中找回")}>
+          <IconButton label={t("paper.dismiss")} onClick={(e) => act(e, { dismissed: true }, t("paper.dismissed_toast"))}>
             <EyeOff className="size-4" />
           </IconButton>
         </div>

@@ -7,6 +7,8 @@
 
 个人 AI 论文阅读与推荐工具。用户（中文研究者，不审查代码、不做测试）每天打开工具点一个按钮，获得几篇与研究方向相关的近期论文；需要时主动触发全文翻译、总结、关键模块分析、创新点提取。所有开发、测试、验证由 Agent 独立完成。
 
+自 1.3 起：界面支持简体中文、English、日本語、한국어（右上角切换），AI 输出跟随所选语言；推荐覆盖理工医社科人文所有学科，包括以中日韩文发表为主的领域。
+
 ## 2. 不可破坏的设计原则
 
 1. **AI 只在用户明确点击后调用。** 打开页面、打开论文、切换标签、自动获取推荐都不能调用 AI（DeepSeek / Gemini）。`mode="auto"` 的推荐永不使用 AI 精排。功能开关只控制按钮是否显示，不等于自动运行。
@@ -15,7 +17,8 @@
 4. **论文来源是固定的可信列表**（`sources/__init__.py` 注册表），不爬取任意网站，只获取合法开放的全文。
 5. **时间窗口决定候选资格，freshness 只影响排序**；使用首次发布日期（arXiv v1），不用更新/收录日期。
 6. **API Key 安全**：只存于 `secrets_store`（系统凭据管理器 / DPAPI），绝不写入设置、数据库、日志、备份或返回给前端（只返回打码形式）。
-7. **普通用户零技术操作**：所有配置都能在 UI 完成；错误信息用中文写清原因和解决办法（`AppError(message, code)`）。
+7. **普通用户零技术操作**：所有配置都能在 UI 完成；错误信息用用户所选的语言写清原因和解决办法（`AppError(t("err.…"), code)`）。
+9. **质量判断要跨学科公平**：期刊统计必须在学科内比较；中日韩论文偏低的引用统计不算负面证据；不确定就是中性 0.5。不能为了让某个学科「看起来有结果」而推荐不相关或低质量的论文——候选太少时给出提示（放宽时间范围），不要降低相关度门槛。
 8. **UI 质量是核心要求**：保持现有设计语言（`frontend/src/index.css` 的 CSS 变量 + Tailwind 主题色、`components/ui/*` 组件），支持深色模式与手机宽度（390px 无横向溢出）。
 
 ## 3. 技术架构速览
@@ -68,7 +71,13 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 - 不要提交 `data/`、`.venv/`、`node_modules/`、任何 Key（见 `.gitignore`）。
 - 模型的 JSON 输出由 `client.parse_json` 读取，它会修正 Gemini 常见的错误（未转义的 LaTeX 反斜杠、用错的结束括号）；改动它时跑 `backend/tests/test_ai_json.py`，并确认正确的 JSON 读取结果不变。
 - 含反斜杠的文件内容（测试、提示词、LaTeX）用编辑工具写入，不要用 Git Bash 的 heredoc：`\\` 可能被折叠成 `\`。
-- 用户可见文字使用简体中文。
+- **用户可见文字不能写死在代码里**，四种语言都要写：
+  - 前端：在 `frontend/src/i18n/zh.ts` 加键，`en.ts` / `ja.ts` / `ko.ts` 必须有同样的键（类型检查会报错）；组件里用 `const t = useT()` 后 `t("key", {param})`，带链接/加粗的句子用 `rich()`；日期数字用 `lib/format.ts`（Intl）。
+  - 后端：在 `i18n_catalog.py` 加 `(zh, en, ja, ko)`；直接返回的文字用 `t("key", **p)`；**要存进数据库、以后再显示的文字**（推荐理由、质量标签、任务进度、批次提示）用 `msg("key", **p)`，返回前端时 `render()`。英文复数写 `"one|other"`（按 `n` / `window` / `found` 参数选择）。
+  - `test_i18n.py` 检查四种语言键与占位符一致；改完界面后至少看一次英文与日文/韩文截图（文字更长，容易溢出）。
+  - 中文版文案仍是基准：简体中文、简洁、写清原因与办法。
+- AI 提示词（`ai/prompts.py`）用英文写，输出语言用 `prompts.output_language()` 取得并在提示词里明确写出；结果按语言保存（`ai_results` / `translations` 的主键含 `lang`），新 AI 功能也要这样做。
+- 推荐质量相关的改动（`quality.py`、`venue_lists.py`、`ranker.py`、`relevance.py`）：除了单元测试，还要用真实 OpenAlex 数据看几个不同学科（计算机、经济、历史、日文/韩文方向）的前几名是否合理；OpenAlex 匿名每天约 10 万次额度，响应头 `X-RateLimit-Remaining` 可查剩余量。
 - 完成一轮工作后更新 `PROJECT_STATUS.md`（已完成/未完成/已知问题/测试结果/日期），必要时更新 `ARCHITECTURE.md` 与 `README.md`。
 
 ## 6. 版本与发布
@@ -87,6 +96,10 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 | 需求 | 已有实现 |
 | --- | --- |
 | 推荐流程/排序/去重 | `recommend/engine.py`, `ranker.py`, `dedupe.py`, `relevance.py`, `quality.py`, `venues.py`, `freshness.py` |
+| 旗舰期刊表（各学科、中日韩期刊） / 学科期刊统计分位数 | `recommend/venue_lists.py`（加期刊时写上 OpenAlex 使用的罗马字/英文刊名）/ `recommend/field_norms.py` |
+| 界面语言 / 后端文字翻译 | 前端 `frontend/src/i18n/`（`useT`、`useLang`、`rich`、`joinList`）；后端 `i18n.py`（`t`、`msg`、`render`、`current`、`use`）+ `i18n_catalog.py` |
+| 论文语言检测、CJK 文本处理 | `textutil.py`（`detect_language`、`has_cjk`、`normalize`、`key_weight`） |
+| 方向预设、学科表、论文语言表 | `directions.py`（`PRESETS`、`PRESET_GROUPS`、`FIELDS`、`PAPER_LANGUAGES`） |
 | 论文读写与状态 | `papers.py`（`upsert`, `set_state`, `seen_identity_keys`, `card`） |
 | 后台任务/进度/取消 | `jobs.py`（`manager.submit`, `Job.update/advance/finish/check_cancelled`） |
 | 全文与文档模型 | `fulltext/model.py`（`units`, `plain_text`）、`arxiv_html.py`、`pdf.py`、`fetcher.py` |
@@ -121,5 +134,6 @@ UI 验证：开发依赖 `requirements-dev.txt`（pytest、playwright、pillow�
 - [ ] 打开论文、切换标签不产生任何 AI 调用（`/api/usage` 计数不变）
 - [ ] 重启应用后：推荐历史、已读/收藏、全文、译文、AI 结果、设置全部仍在
 - [ ] `pytest` 全部通过；`npm run build` 通过；浅色/深色、桌面/手机截图无明显问题
+- [ ] 四种界面语言下各页面没有未翻译的文字、没有溢出；切换语言后历史推荐的理由也换成新语言
 - [ ] GitHub Actions 的 CI 全绿；发布版本时 Release 工作流生成安装包且冒烟测试通过
 - [ ] 文档与代码一致

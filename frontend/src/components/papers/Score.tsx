@@ -1,5 +1,6 @@
 import { Award, Clock, Info, Target } from "lucide-react";
 import type { Breakdown } from "../../api/types";
+import { t } from "../../i18n";
 import { cn } from "../../lib/cn";
 import { Popover } from "../ui/overlay";
 
@@ -36,7 +37,7 @@ function Bar({ label, icon, value, weight, note }: { label: string; icon: React.
         <span className="flex items-center gap-1.5 text-text-2">
           {icon}
           {label}
-          {note && <span className="text-[11px] text-text-3">（{note}）</span>}
+          {note && <span className="text-[11px] text-text-3">{t("score.note", { note })}</span>}
         </span>
         <span className="tabular-nums text-text">
           {Math.round(value * 100)}
@@ -50,18 +51,19 @@ function Bar({ label, icon, value, weight, note }: { label: string; icon: React.
   );
 }
 
-const KIND_LABEL: Record<string, string> = { starred: "收藏", noted: "写过笔记", analyzed: "用 AI 分析过", opened: "读过", dismissed: "标记为不感兴趣" };
+const KINDS = ["starred", "noted", "analyzed", "opened", "dismissed"] as const;
 
 function PreferenceLine({ p }: { p: NonNullable<Breakdown["preference"]> }) {
   const pts = Math.round(p.adjust * 100);
   const up = p.adjust > 0;
+  const kind = (KINDS as readonly string[]).includes(p.kind ?? "") ? (p.kind as (typeof KINDS)[number]) : "opened";
   const why = p.title && p.kind && Math.abs(p.adjust) >= 0.03
-    ? `与你${KIND_LABEL[p.kind] ?? "关注"}的《${p.title}》相近`
-    : up ? "与你的收藏和阅读记录更接近" : "与你的收藏和阅读记录关联较弱";
+    ? (kind === "dismissed" ? t("score.pref_dismissed", { title: p.title }) : t("score.pref_similar", { title: p.title, kind: t(`score.kind.${kind}`) }))
+    : up ? t("score.pref_closer") : t("score.pref_weaker");
   return (
     <p className="mt-1 flex gap-1 text-[12px] leading-snug text-text-3">
       <span className={cn("shrink-0 tabular-nums font-medium", up ? "text-success" : "text-text-2")}>
-        按你的反馈 {up ? "+" : pts === 0 ? "±" : "−"}{Math.abs(pts)}
+        {t("score.by_feedback")} {up ? "+" : pts === 0 ? "±" : "−"}{Math.abs(pts)}
       </span>
       <span className="min-w-0 truncate" title={why}>· {why}</span>
     </p>
@@ -69,32 +71,39 @@ function PreferenceLine({ p }: { p: NonNullable<Breakdown["preference"]> }) {
 }
 
 export function BreakdownPanel({ b, className }: { b: Breakdown; className?: string }) {
-  const kw = [...b.matched.title.map((k) => ({ k, t: true })), ...b.matched.abstract.map((k) => ({ k, t: false }))];
+  const kw = [...b.matched.title.map((k) => ({ k, inTitle: true })), ...b.matched.abstract.map((k) => ({ k, inTitle: false }))];
   return (
     <div className={cn("space-y-3", className)}>
       <div>
-        <Bar label="研究相关度" icon={<Target className="size-3.5" />} value={b.relevance} weight={b.weights.relevance}
-          note={b.ai_relevance != null ? "含 AI 精排" : undefined} />
+        <Bar label={t("score.relevance")} icon={<Target className="size-3.5" />} value={b.relevance} weight={b.weights.relevance}
+          note={b.ai_relevance != null ? t("score.with_ai") : undefined} />
         {b.preference && Math.abs(b.preference.adjust) >= 0.005 && <PreferenceLine p={b.preference} />}
       </div>
-      <Bar label="论文质量" icon={<Award className="size-3.5" />} value={b.quality} weight={b.weights.quality}
-        note={b.quality_insufficient ? "依据不足，按中性值计" : b.quality_confidence < 0.5 ? "依据有限" : undefined} />
-      <Bar label="时效性" icon={<Clock className="size-3.5" />} value={b.freshness} weight={b.weights.freshness} />
+      <Bar label={t("score.quality")} icon={<Award className="size-3.5" />} value={b.quality} weight={b.weights.quality}
+        note={b.quality_insufficient ? t("score.insufficient") : b.quality_confidence < 0.5 ? t("score.limited") : undefined} />
+      <Bar label={t("score.freshness")} icon={<Clock className="size-3.5" />} value={b.freshness} weight={b.weights.freshness} />
+      {(b.field_mismatch || b.minor || b.review_bonus) && (
+        <ul className="space-y-0.5 text-[12px] leading-snug text-text-3">
+          {b.review_bonus ? <li>{t("score.review_bonus")}</li> : null}
+          {b.field_mismatch ? <li>{t("score.field_mismatch")}</li> : null}
+          {b.minor ? <li>{t("score.minor")}</li> : null}
+        </ul>
+      )}
       {kw.length > 0 && (
         <div>
-          <div className="mb-1 text-[11px] font-medium text-text-3">命中关键词</div>
+          <div className="mb-1 text-[11px] font-medium text-text-3">{t("score.matched")}</div>
           <div className="flex flex-wrap gap-1">
-            {kw.map(({ k, t }) => (
-              <span key={k + t} className={cn("rounded px-1.5 py-0.5 text-xs", t ? "bg-accent-soft text-accent-text" : "bg-surface-3 text-text-2")}>
+            {kw.map(({ k, inTitle }) => (
+              <span key={k + inTitle} className={cn("rounded px-1.5 py-0.5 text-xs", inTitle ? "bg-accent-soft text-accent-text" : "bg-surface-3 text-text-2")}>
                 {k}
-                {t && <span className="ml-1 opacity-60">标题</span>}
+                {inTitle && <span className="ml-1 opacity-60">{t("score.in_title")}</span>}
               </span>
             ))}
           </div>
         </div>
       )}
       <div>
-        <div className="mb-1 text-[11px] font-medium text-text-3">质量依据</div>
+        <div className="mb-1 text-[11px] font-medium text-text-3">{t("score.quality_basis")}</div>
         {b.quality_signals.length ? (
           <ul className="space-y-0.5 text-[13px] text-text-2">
             {b.quality_signals.map((s) => (
@@ -105,7 +114,7 @@ export function BreakdownPanel({ b, className }: { b: Breakdown; className?: str
             ))}
           </ul>
         ) : (
-          <p className="text-[13px] text-text-3">暂无可靠的质量信号（新论文通常还没有引用数据），不加分也不扣分。</p>
+          <p className="text-[13px] text-text-3">{t("score.no_signals")}</p>
         )}
       </div>
     </div>
@@ -125,8 +134,8 @@ export function ScoreWithBreakdown({ score, breakdown, size }: { score: number; 
             toggle();
           }}
           className="relative z-10 rounded-full transition-transform hover:scale-105"
-          aria-label="查看评分构成"
-          title="推荐评分（点击查看构成）"
+          aria-label={t("score.view")}
+          title={t("score.title_tip")}
         >
           <ScoreRing score={score} size={size} />
         </button>
@@ -134,7 +143,7 @@ export function ScoreWithBreakdown({ score, breakdown, size }: { score: number; 
     >
       <div onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-baseline justify-between">
-          <span className="text-sm font-semibold text-text">推荐评分</span>
+          <span className="text-sm font-semibold text-text">{t("score.title")}</span>
           <span className="text-lg font-semibold tabular-nums text-text">
             {Math.round(score * 100)}
             <span className="text-xs font-normal text-text-3"> / 100</span>
@@ -143,7 +152,7 @@ export function ScoreWithBreakdown({ score, breakdown, size }: { score: number; 
         <BreakdownPanel b={breakdown} />
         <p className="mt-3 flex gap-1.5 border-t border-border pt-2.5 text-[11px] leading-relaxed text-text-3">
           <Info className="mt-px size-3 shrink-0" />
-          综合评分 = 各分项 × 权重之和。权重可在「设置 → 推荐设置」中调整。
+          {t("score.formula")}
         </p>
       </div>
     </Popover>

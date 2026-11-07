@@ -3,8 +3,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import papers as papers_repo
+from . import i18n, papers as papers_repo
 from .ai import analyze, translate
+from .i18n import t
 
 
 def _cell(t: str) -> str:
@@ -34,53 +35,55 @@ def _table_md(block: dict[str, Any]) -> str:
 
 
 def translation_markdown(paper: dict[str, Any], doc: dict[str, Any], mode: str = "bilingual") -> str:
-    """mode: 'zh' (translation only, original where missing) or 'bilingual'."""
+    """mode: 'translation' (translation only, original where missing) or 'bilingual'."""
     tmap = translate.translated_map(paper["id"])
+    only = mode == "translation"
 
     def tr(uid: str, original: str) -> str:
-        t = tmap.get(uid, {}).get("text")
-        if mode == "zh":
-            return t or original
-        return f"{original}\n\n> {t}" if t else original
+        text = tmap.get(uid, {}).get("text")
+        if only:
+            return text or original
+        return f"{original}\n\n> {text}" if text else original
 
     lines = [f"# {paper['title']}", ""]
     if paper.get("authors"):
-        lines.append("**作者**：" + ", ".join(paper["authors"][:30]))
+        lines.append(f"**{t('ex.authors')}**: " + ", ".join(paper["authors"][:30]))
     meta = [x for x in [paper.get("published"), paper.get("venue"), paper.get("url")] if x]
     if meta:
-        lines.append("**信息**：" + " · ".join(meta))
-    lines += [f"**全文来源**：{doc.get('source_label')}（{doc.get('source_url')}）", ""]
-    done = sum(1 for _ in tmap)
-    if done == 0:
-        lines += ["> 注意：本文尚未翻译，以下为原文。", ""]
+        lines.append(f"**{t('ex.info')}**: " + " · ".join(meta))
+    lines += [f"**{t('ex.fulltext_source')}**: {i18n.render(doc.get('source_label'))} ({doc.get('source_url')})", ""]
+    if not tmap:
+        lines += [f"> {t('ex.not_translated')}", ""]
+    titles = {"doc.front": t("doc.front"), "doc.untitled": t("doc.untitled")}
     for s in doc["sections"]:
         hashes = "#" * min(4, s["level"] + 1)
+        original_title = s["title"] or titles.get(s.get("title_key") or "", "")
         title_t = tmap.get(f"{s['id']}::title", {}).get("text")
         num = (s.get("number") or "") + " " if s.get("number") else ""
-        if title_t and mode == "bilingual":
-            title = f"{num}{title_t}（{s['title']}）"
+        if title_t and not only:
+            title = f"{num}{title_t} ({original_title})"
         else:
-            title = f"{num}{title_t or s['title']}"
+            title = f"{num}{title_t or original_title}"
         lines += [f"{hashes} {title}", ""]
         for b in s["blocks"]:
-            t = b["type"]
-            if t in ("paragraph", "heading"):
+            kind = b["type"]
+            if kind in ("paragraph", "heading"):
                 txt = tr(b["id"], b["text"])
-                lines += [f"**{txt}**" if t == "heading" and mode == "zh" else txt, ""]
-            elif t == "equation":
+                lines += [f"**{txt}**" if kind == "heading" and only else txt, ""]
+            elif kind == "equation":
                 lines += [f"$$\n{b['latex']}\n$$" + (f"  {b['tag']}" if b.get("tag") else ""), ""]
-            elif t == "list":
+            elif kind == "list":
                 for i, item in enumerate(b.get("items", [])):
                     prefix = f"{i + 1}." if b.get("ordered") else "-"
                     lines.append(f"{prefix} {tr(b['id'] + '::' + str(i), item)}".replace("\n\n> ", "\n   > "))
                 lines.append("")
-            elif t in ("figure", "table", "code"):
+            elif kind in ("figure", "table", "code"):
                 cap = tr(b["id"] + "::caption", b.get("caption") or "") if b.get("caption") else ""
                 label = b.get("label") or ""
-                if t == "figure":
+                if kind == "figure":
                     for img in b.get("images", []):
                         lines.append(f"![{label}]({img})")
-                elif t == "table":
+                elif kind == "table":
                     md = _table_md(b)
                     if md:
                         lines += ["", md]
@@ -89,9 +92,9 @@ def translation_markdown(paper: dict[str, Any], doc: dict[str, Any], mode: str =
                 if label or cap:
                     lines.append(f"*{label}{': ' if label and cap else ''}{cap}*")
                 lines.append("")
-            elif t == "reference":
+            elif kind == "reference":
                 lines += [f"- {b.get('label') or ''} {b['text']}".strip(), ""]
-            elif t == "unparsed":
+            elif kind == "unparsed":
                 lines += [f"`{b['text']}`", ""]
     return "\n".join(lines)
 
@@ -100,7 +103,7 @@ def _s(v: Any) -> str:
     if v is None:
         return ""
     if isinstance(v, dict):
-        return "；".join(_s(x) for x in v.values() if x)
+        return "; ".join(_s(x) for x in v.values() if x)
     return str(v).strip()
 
 
@@ -110,87 +113,112 @@ def _lst(v: Any) -> list[Any]:
 
 def _bullets(items: Any, fmt=lambda x: _s(x)) -> list[str]:
     out = [f"- {fmt(x)}" for x in _lst(items) if fmt(x)]
-    return out or ["- 论文未明确说明"]
+    return out or [f"- {t('ex.not_stated')}"]
+
+
+def _code(prefix: str, value: Any) -> str:
+    """Enumerated values (paper type, module category) are English codes; older results stored text."""
+    v = _s(value)
+    key = f"{prefix}.{v}"
+    return t(key) if key in i18n.M else v
+
+
+def _join(items: Any) -> str:
+    return i18n.join([_s(x) for x in _lst(items) if _s(x)]) or t("ex.not_stated")
 
 
 def _summary_md(c: dict[str, Any]) -> list[str]:
     p, m, e, a = c.get("problem") or {}, c.get("method") or {}, c.get("experiments") or {}, c.get("reading_advice") or {}
-    out = [f"> **一句话总结**：{_s(c.get('tldr'))}", ""]
+    out = [f"> **{t('ex.tldr')}**: {_s(c.get('tldr'))}", ""]
     if c.get("paper_type"):
-        out += [f"**论文类型**：{_s(c['paper_type'])}", ""]
-    out += ["### 研究问题", f"- **问题**：{_s(p.get('question'))}", f"- **意义**：{_s(p.get('importance'))}", "",
-            "### 研究方法", f"- **技术路线**：{_s(m.get('overview'))}", f"- **核心思想**：{_s(m.get('core_idea'))}"]
+        out += [f"**{t('ex.paper_type')}**: {_code('ptype', c['paper_type'])}", ""]
+    out += [f"### {t('ex.problem')}", f"- **{t('ex.question')}**: {_s(p.get('question'))}",
+            f"- **{t('ex.importance')}**: {_s(p.get('importance'))}", "",
+            f"### {t('ex.method')}", f"- **{t('ex.overview')}**: {_s(m.get('overview'))}",
+            f"- **{t('ex.core_idea')}**: {_s(m.get('core_idea'))}"]
     if m.get("relation_to_prior"):
-        out.append(f"- **与已有方法的关系**：{_s(m['relation_to_prior'])}")
-    out += ["", "### 实验与结果",
-            f"- **数据集**：{'、'.join(_s(x) for x in _lst(e.get('datasets'))) or '论文未明确说明'}",
-            f"- **评价指标**：{'、'.join(_s(x) for x in _lst(e.get('metrics'))) or '论文未明确说明'}", "- **主要结果**："]
+        out.append(f"- **{t('ex.relation')}**: {_s(m['relation_to_prior'])}")
+    out += ["", f"### {t('ex.experiments')}",
+            f"- **{t('ex.datasets')}**: {_join(e.get('datasets'))}",
+            f"- **{t('ex.metrics')}**: {_join(e.get('metrics'))}", f"- **{t('ex.main_results')}**:"]
     out += ["  " + b for b in _bullets(e.get("main_results"))]
     if e.get("evidence_assessment"):
-        out.append(f"- **实验是否充分（AI 评估）**：{_s(e['evidence_assessment'])}")
-    out += ["", "### 主要结论", *_bullets(c.get("conclusions")), "", "### 值得关注", *_bullets(c.get("highlights")), "",
-            "### 局限性"]
-    out += _bullets(c.get("limitations"), lambda x: (f"[{'作者承认' if x.get('source') == 'author' else 'AI 评估'}] {_s(x.get('point'))}"
-                                                    if isinstance(x, dict) else _s(x)))
-    out += ["", "### 阅读建议"]
+        out.append(f"- **{t('ex.evidence')}**: {_s(e['evidence_assessment'])}")
+    out += ["", f"### {t('ex.conclusions')}", *_bullets(c.get("conclusions")), "",
+            f"### {t('ex.highlights')}", *_bullets(c.get("highlights")), "", f"### {t('ex.limitations')}"]
+    out += _bullets(c.get("limitations"), lambda x: (
+        f"[{t('ex.by_author') if x.get('source') == 'author' else t('ex.by_ai')}] {_s(x.get('point'))}"
+        if isinstance(x, dict) else _s(x)))
+    out += ["", f"### {t('ex.reading')}"]
     if _lst(a.get("audience")):
-        out.append(f"- **适合方向**：{'、'.join(_s(x) for x in _lst(a['audience']))}")
+        out.append(f"- **{t('ex.audience')}**: {_join(a['audience'])}")
     for ps in _lst(a.get("priority_sections")):
-        out.append(f"- **优先阅读**：{_s(ps.get('section'))} — {_s(ps.get('reason'))}" if isinstance(ps, dict) else f"- **优先阅读**：{_s(ps)}")
+        out.append(f"- **{t('ex.priority')}**: {_s(ps.get('section'))} — {_s(ps.get('reason'))}" if isinstance(ps, dict)
+                   else f"- **{t('ex.priority')}**: {_s(ps)}")
     if a.get("quick_path"):
-        out.append(f"- **快速理解路径**：{_s(a['quick_path'])}")
+        out.append(f"- **{t('ex.quick_path')}**: {_s(a['quick_path'])}")
     return out
 
 
 def _modules_md(c: dict[str, Any]) -> list[str]:
     if c.get("applicable") is False:
-        return [f"> 本文不包含可拆分的技术模块：{_s(c.get('reason'))}", "", "### 核心论证结构",
+        return [f"> {t('ex.no_modules')}: {_s(c.get('reason'))}", "", f"### {t('ex.structure')}",
                 *[f"{i + 1}. {_s(x)}" for i, x in enumerate(_lst(c.get("structure")))]]
-    novelty = {"new": "本文提出", "adapted": "改进已有方法", "existing": "沿用已有方法"}
-    out = ["### 整体架构", _s(c.get("overview")), ""]
+    out = [f"### {t('ex.architecture')}", _s(c.get("overview")), ""]
     if _lst(c.get("flow")):
-        out += ["### 模块协作流程", *[f"- {_s(f.get('from'))} → {_s(f.get('to'))}：{_s(f.get('description'))}"
-                                     for f in _lst(c["flow"]) if isinstance(f, dict)], ""]
+        out += [f"### {t('ex.flow')}", *[f"- {_s(f.get('from'))} → {_s(f.get('to'))}: {_s(f.get('description'))}"
+                                         for f in _lst(c["flow"]) if isinstance(f, dict)], ""]
     for mod in _lst(c.get("modules")):
         if not isinstance(mod, dict):
             continue
-        name = _s(mod.get("name")) + (f"（{_s(mod['name_en'])}）" if mod.get("name_en") else "")
-        tags = " · ".join(x for x in [_s(mod.get("category")), novelty.get(_s(mod.get("novelty")), ""),
+        name = _s(mod.get("name")) + (f" ({_s(mod['name_en'])})" if mod.get("name_en") else "")
+        novelty = _s(mod.get("novelty"))
+        tags = " · ".join(x for x in [_code("mcat", mod.get("category")),
+                                      t(f"novelty.{novelty}") if novelty in ("new", "adapted", "existing") else "",
                                       f"§{_s(mod['section'])}" if mod.get("section") else ""] if x)
-        out += [f"### {name}", f"_{tags}_", "", f"- **作用**：{_s(mod.get('role'))}",
-                f"- **输入 → 输出**：{_s(mod.get('inputs'))} → {_s(mod.get('outputs'))}", f"- **原理**：{_s(mod.get('mechanism'))}"]
+        out += [f"### {name}", f"_{tags}_", "", f"- **{t('ex.role')}**: {_s(mod.get('role'))}",
+                f"- **{t('ex.io')}**: {_s(mod.get('inputs'))} → {_s(mod.get('outputs'))}",
+                f"- **{t('ex.mechanism')}**: {_s(mod.get('mechanism'))}"]
         if _s(mod.get("key_formula")):
             out += ["", f"$$\n{_s(mod['key_formula']).strip('$')}\n$$"]
         out.append("")
     if _lst(c.get("design_insights")):
-        out += ["### 关键设计选择", *_bullets(c["design_insights"])]
+        out += [f"### {t('ex.design')}", *_bullets(c["design_insights"])]
     return out
 
 
 def _contributions_md(c: dict[str, Any]) -> list[str]:
-    verify = {"exact": "✓ 原文已核验", "close": "✓ 与原文基本一致", "partial": "⚠ 仅部分匹配原文",
-              "not_found": "✗ 未能在原文中找到", "missing": "缺少原文引用"}
-    out = [f"> **解决的核心问题**：{_s(c.get('problem_solved'))}", "", "### ① 作者明确声明的贡献"]
+    out = [f"> **{t('ex.problem_solved')}**: {_s(c.get('problem_solved'))}", "", f"### ① {t('ex.explicit')}"]
     for e in _lst(c.get("explicit")):
         if isinstance(e, dict):
-            out += [f"- **{_s(e.get('claim'))}**（{verify.get(e.get('verified'), '未核验')}{'，§' + _s(e['section']) if e.get('section') else ''}）",
-                    f"  > {_s(e.get('quote'))}"]
-    out += ["", "### ② 基于论文内容归纳的贡献"]
-    out += _bullets(c.get("derived"), lambda x: f"{_s(x.get('point'))}（依据：{_s(x.get('basis'))}）" if isinstance(x, dict) else _s(x))
+            v = e.get("verified")
+            check = t(f"verify.{v}") if v in ("exact", "close", "partial", "not_found", "missing") else t("verify.none")
+            section = f", §{_s(e['section'])}" if e.get("section") else ""
+            out += [f"- **{_s(e.get('claim'))}** ({check}{section})", f"  > {_s(e.get('quote'))}"]
+    out += ["", f"### ② {t('ex.derived')}"]
+    out += _bullets(c.get("derived"), lambda x: f"{_s(x.get('point'))} ({t('ex.basis')}: {_s(x.get('basis'))})"
+                    if isinstance(x, dict) else _s(x))
     if _lst(c.get("improvements")):
-        out += ["", "### 相比已有方法的改进"]
-        out += _bullets(c["improvements"], lambda x: f"**{_s(x.get('aspect'))}**：{_s(x.get('detail'))}（证据：{_s(x.get('evidence'))}）"
-                        if isinstance(x, dict) else _s(x))
+        out += ["", f"### {t('ex.improvements')}"]
+        out += _bullets(c["improvements"], lambda x: f"**{_s(x.get('aspect'))}**: {_s(x.get('detail'))} "
+                        f"({t('ex.evidence_short')}: {_s(x.get('evidence'))})" if isinstance(x, dict) else _s(x))
     if _lst(c.get("new_methods")):
-        out += ["", "### 新提出的方法 / 模型 / 数据集"]
-        out += _bullets(c["new_methods"], lambda x: f"**{_s(x.get('name'))}**：{_s(x.get('description'))}" if isinstance(x, dict) else _s(x))
-    if _lst(c.get("experimental_support")):
-        strength = {"strong": "强", "moderate": "中", "weak": "弱"}
-        out += ["", "### 实验支撑的结论"]
-        out += _bullets(c["experimental_support"], lambda x: f"{_s(x.get('claim'))}（支撑：{strength.get(_s(x.get('strength')), '?')}；{_s(x.get('evidence'))}）"
+        out += ["", f"### {t('ex.new_methods')}"]
+        out += _bullets(c["new_methods"], lambda x: f"**{_s(x.get('name'))}**: {_s(x.get('description'))}"
                         if isinstance(x, dict) else _s(x))
-    out += ["", "### ③ AI 推断的潜在价值（推测，非论文观点）"]
-    out += _bullets(c.get("inferred"), lambda x: f"{_s(x.get('point'))}（理由：{_s(x.get('rationale'))}）" if isinstance(x, dict) else _s(x))
+    if _lst(c.get("experimental_support")):
+        out += ["", f"### {t('ex.support')}"]
+
+        def fmt(x: Any) -> str:
+            if not isinstance(x, dict):
+                return _s(x)
+            st = _s(x.get("strength"))
+            strength = t(f"strength.{st}") if st in ("strong", "moderate", "weak") else "?"
+            return f"{_s(x.get('claim'))} ({t('ex.support_strength')}: {strength}; {_s(x.get('evidence'))})"
+        out += _bullets(c["experimental_support"], fmt)
+    out += ["", f"### ③ {t('ex.inferred')}"]
+    out += _bullets(c.get("inferred"), lambda x: f"{_s(x.get('point'))} ({t('ex.rationale')}: {_s(x.get('rationale'))})"
+                    if isinstance(x, dict) else _s(x))
     return out
 
 
@@ -200,9 +228,9 @@ def analysis_markdown(paper: dict[str, Any]) -> str:
     out += [" · ".join(meta), ""]
     note = (papers_repo.get_state(paper["id"]).get("note") or "").strip()
     if note:
-        out += ["## 我的笔记", "", note, ""]
-    renderers = {"summary": ("论文总结", _summary_md), "modules": ("关键模块分析", _modules_md),
-                 "contributions": ("创新点与贡献", _contributions_md)}
+        out += [f"## {t('ex.my_note')}", "", note, ""]
+    renderers = {"summary": ("ai.label.summary", _summary_md), "modules": ("ai.label.modules", _modules_md),
+                 "contributions": ("ex.contributions_title", _contributions_md)}
     found = False
     for kind, (title, render) in renderers.items():
         r = analyze.get_result(paper["id"], kind)
@@ -210,9 +238,10 @@ def analysis_markdown(paper: dict[str, Any]) -> str:
             continue
         found = True
         basis = (r.get("basis") or {}).get("type")
-        out += [f"## {title}", f"_基于{'全文' if basis == 'fulltext' else '摘要'}生成 · {r.get('model')} · {r.get('created_at')} · 内容由 AI 生成，请以原文为准_", ""]
+        based = t("ex.based_fulltext" if basis == "fulltext" else "ex.based_abstract")
+        out += [f"## {t(title)}", f"_{based} · {r.get('model')} · {r.get('created_at')} · {t('ex.ai_disclaimer')}_", ""]
         out += render(r["content"])
         out.append("")
     if not found:
-        out.append("> 这篇论文还没有生成任何 AI 分析。")
+        out.append(f"> {t('ex.no_analysis')}")
     return "\n".join(out)

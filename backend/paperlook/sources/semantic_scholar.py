@@ -7,7 +7,7 @@ import re
 from datetime import date
 from typing import Any
 
-from .. import secrets_store
+from .. import i18n, secrets_store
 from ..textutil import collapse_ws
 from .base import RateLimiter, RawPaper, Source, SourceError, SourceQuery, clean_doi, code_signals, get_with_retry, parse_date
 
@@ -33,11 +33,11 @@ def parse_item(it: dict[str, Any], today: date) -> RawPaper | None:
         return None
     ext = it.get("externalIds") or {}
     published = parse_date(it.get("publicationDate"))
-    quality, note = "exact", "Semantic Scholar 记录的出版日期"
+    quality, note = "exact", "date.s2"
     if published is None:
-        quality, note = "unknown", "来源仅提供年份，无法确认具体日期"
+        quality, note = "unknown", "date.year_only"
     elif published > today:
-        quality, note = "approx", "记录的出版日期晚于今天"
+        quality, note = "approx", "date.future"
     venue = it.get("venue") or ((it.get("publicationVenue") or {}).get("name"))
     arxiv_id = ext.get("ArXiv")
     doi = clean_doi(ext.get("DOI"))
@@ -72,13 +72,13 @@ def parse_item(it: dict[str, Any], today: date) -> RawPaper | None:
 class SemanticScholarSource(Source):
     id = "semantic_scholar"
     name = "Semantic Scholar"
-    description = "AI2 的学术搜索引擎，覆盖计算机科学的会议与期刊，提供高影响力引用等信息。"
+    description = "source.s2.desc"
     homepage = "https://www.semanticscholar.org"
     key_policy = "recommended"
     key_secret = secrets_store.SEMANTIC_SCHOLAR
-    key_help = "匿名访问经常被限流（HTTP 429），建议在 semanticscholar.org/product/api 免费申请 API Key。"
+    key_help = "source.s2.key_help"
     default_enabled = False
-    coverage = "期刊、会议与预印本 · 偏重 CS 与生物医学"
+    coverage = "source.s2.coverage"
 
     def search(self, q: SourceQuery) -> list[RawPaper]:
         if not q.keywords:
@@ -95,8 +95,8 @@ class SemanticScholarSource(Source):
             resp = get_with_retry(f"{API}/paper/search/bulk", params=params, headers=headers,
                                   source_name="Semantic Scholar", limiter=limiter, attempts=2 if not key else 3)
         except SourceError as e:
-            if "429" in e.message and not key:
-                raise SourceError("Semantic Scholar 拒绝了匿名请求（频率限制）。建议在「论文来源」中填写免费 API Key。")
+            if e.code == "rate_limit" and not key:
+                raise SourceError(i18n.msg("src.s2_anonymous"), code="rate_limit")
             raise
         today = date.today()
         out = []

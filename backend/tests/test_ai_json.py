@@ -41,3 +41,10 @@ def test_correct_json_is_unchanged():
     for indent in (None, 2):
         for ascii_only in (False, True):
             assert parse_json(json.dumps(obj, ensure_ascii=ascii_only, indent=indent)) == obj
+
+
+def test_object_followed_by_extra_output():
+    from paperlook.ai.client import parse_json
+
+    assert parse_json('{"tldr": "a", "n": 1}\n{"tldr": "b"}') == {"tldr": "a", "n": 1}
+    assert parse_json('Here: {"a": [1, 2]} trailing {"x": 0}') == {"a": [1, 2]}

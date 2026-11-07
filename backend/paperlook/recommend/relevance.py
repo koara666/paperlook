@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..textutil import normalize
+from ..textutil import has_cjk, normalize
 
 KW_STRENGTH = 0.6
 CATEGORY_BONUS_PRIMARY = 0.12
@@ -24,8 +24,8 @@ CATEGORY_ONLY_BASE = 0.5  # directions without keywords: relevance from category
 
 def _word_pattern(word: str) -> str:
     w = re.escape(word)
-    # light plural/inflection tolerance: model(s), network(s), class(es)
-    if len(word) > 3 and word.isalpha():
+    # light plural/inflection tolerance for English words: model(s), network(s), class(es)
+    if len(word) > 3 and word.isascii() and word.isalpha():
         if word.endswith("s"):
             return w + "?"
         return w + "(?:s|es)?"
@@ -60,7 +60,12 @@ def compile_keyword(kw: str) -> Keyword | None:
         return None
     words = norm.split(" ")
     body = r"\s?".join(_word_pattern(w) for w in words)  # "multi modal" == "multimodal"
-    return Keyword(raw, re.compile(rf"(?<![a-z0-9]){body}(?![a-z0-9])"), False)
+    # Word boundaries only make sense for alphabetic scripts: CJK text has no spaces, and Korean
+    # attaches particles to words (조선시대의), so CJK keywords match as substrings. Latin keywords only
+    # need a Latin boundary, so "transformer" still matches in "基于transformer的模型".
+    start = "" if has_cjk(norm[0]) else r"(?<![a-z0-9])"
+    end = "" if has_cjk(norm[-1]) else r"(?![a-z0-9])"
+    return Keyword(raw, re.compile(start + body + end), False)
 
 
 @dataclass
@@ -72,13 +77,18 @@ class CompiledDirection:
     keywords: list[Keyword]
     exclude: list[Keyword]
     raw: dict[str, Any] = field(default_factory=dict)
+    window_days: int = 3650
+    languages: list[str] = field(default_factory=list)  # empty = any language
+    fields: list[str] = field(default_factory=list)  # OpenAlex fields of study; empty = any
 
 
 def compile_direction(d: dict[str, Any]) -> CompiledDirection:
     kws = [c for c in (compile_keyword(k) for k in d.get("keywords", [])) if c]
     exc = [c for c in (compile_keyword(k) for k in d.get("exclude", [])) if c]
     return CompiledDirection(id=d["id"], name=d["name"], weight=int(d.get("weight", 3)),
-                             categories=list(d.get("categories", [])), keywords=kws, exclude=exc, raw=d)
+                             categories=list(d.get("categories", [])), keywords=kws, exclude=exc, raw=d,
+                             window_days=int(d.get("window_days") or 3650), languages=list(d.get("languages") or []),
+                             fields=list(d.get("fields") or []))
 
 
 @dataclass

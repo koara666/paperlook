@@ -56,7 +56,7 @@ def main() -> None:
 
     port = args.port
     if _running_instance(port):
-        print(f"PaperLook 已在运行：http://127.0.0.1:{port}")
+        print(f"PaperLook is already running: http://127.0.0.1:{port}")
         if not args.no_browser:
             webbrowser.open(f"http://127.0.0.1:{port}")
         return
@@ -70,7 +70,9 @@ def main() -> None:
     setup_logging()
     app = create_app()
     url = f"http://127.0.0.1:{port}"
-    print(f"\n  PaperLook {config.VERSION} 已启动：{url}\n  数据目录：{config.DATA_DIR}\n  关闭此窗口即可退出。\n")
+    from . import i18n
+    banner = i18n.t("console.started", i18n.current(), version=config.VERSION, url=url, data=str(config.DATA_DIR))
+    print("\n  " + banner.replace("\n", "\n  ") + "\n")
 
     if not args.no_browser:
         def _open() -> None:

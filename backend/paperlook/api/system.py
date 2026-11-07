@@ -9,6 +9,7 @@ from fastapi import APIRouter
 
 from .. import config, db, secrets_store
 from ..errors import AppError
+from ..i18n import t
 from ..ai.client import is_configured, usage_summary
 from ..jobs import manager
 
@@ -61,12 +62,12 @@ def check_update():
     try:
         r = httpx.get(url, timeout=15, headers={"User-Agent": config.USER_AGENT, "Accept": "application/vnd.github+json"})
     except httpx.HTTPError as e:
-        raise AppError(f"无法连接 GitHub 检查更新（{type(e).__name__}），请检查网络后重试。", code="network")
+        raise AppError(t("err.update_network", error=type(e).__name__), code="network")
     if r.status_code == 404:
         return {"current": config.VERSION, "latest": None, "has_update": False,
                 "url": f"https://github.com/{config.GITHUB_REPO}/releases"}
     if r.status_code != 200:
-        raise AppError(f"GitHub 暂时无法访问（HTTP {r.status_code}），请稍后重试。", code="network")
+        raise AppError(t("err.update_http", status=r.status_code), code="network")
     rel = r.json()
     latest = str(rel.get("tag_name") or "").removeprefix("v")
     cur, new = parse_version(config.VERSION), parse_version(latest)
@@ -89,8 +90,7 @@ def usage():
 def get_job(job_id: str):
     j = manager.get(job_id)
     if not j:
-        from ..errors import AppError
-        raise AppError("任务不存在", status_code=404)
+        raise AppError(t("err.job_not_found"), status_code=404)
     return j
 
 

@@ -5,8 +5,9 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .. import db, papers as papers_repo
+from .. import db, i18n, papers as papers_repo
 from ..errors import AppError
+from ..i18n import t
 from ..jobs import manager
 from ..recommend import engine
 
@@ -48,7 +49,7 @@ def _items_for_batches(batch_ids: list[int]) -> list[dict[str, Any]]:
         paper = papers_repo._decode({k: r[k] for k in r if k in papers_repo.COLUMNS or k == "id"} | {"id": r["paper_id"]})
         out.append({
             "rec_id": r["rec_id"], "batch_id": r["batch_id"], "rank": r["rank"], "score": r["score"],
-            "breakdown": db.loads(r["breakdown"], {}), "reasons": db.loads(r["reasons"], []),
+            "breakdown": i18n.render(db.loads(r["breakdown"], {})), "reasons": i18n.render(db.loads(r["reasons"], [])),
             "direction_name": r["direction_name"], "ai": db.loads(r["ai"], None),
             "recommended_at": r["rec_created_at"],
             "paper": papers_repo.card(paper, states[r["paper_id"]]),
@@ -59,7 +60,7 @@ def _items_for_batches(batch_ids: list[int]) -> list[dict[str, Any]]:
 
 def _batch(row: dict[str, Any]) -> dict[str, Any]:
     return {"id": row["id"], "created_at": row["created_at"], "day": row["day"], "params": db.loads(row["params"], {}),
-            "stats": db.loads(row["stats"], {}), "message": row["message"]}
+            "stats": i18n.render(db.loads(row["stats"], {})), "message": engine.render_message(row["message"])}
 
 
 @router.get("/recommend/today")
@@ -96,5 +97,5 @@ def history(days: int = 30, before: str | None = None):
 def batch(batch_id: int):
     r = db.query_one("SELECT * FROM rec_batches WHERE id = ?", (batch_id,))
     if not r:
-        raise AppError("推荐批次不存在", status_code=404)
+        raise AppError(t("err.batch_not_found"), status_code=404)
     return {**_batch(r), "items": _items_for_batches([batch_id])}

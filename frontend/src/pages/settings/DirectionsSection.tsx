@@ -1,55 +1,114 @@
-import { ChevronDown, Compass, Pencil, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
+import { ChevronDown, Compass, Info, Pencil, Plus, Sparkles, Trash2, Wand2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api, errorMessage } from "../../api/client";
-import { useAiConfig, useDirectionMutations, useDirections, useMeta } from "../../api/hooks";
+import { useAiConfig, useDirectionMutations, useDirections, useMeta, useSettings } from "../../api/hooks";
 import type { Direction } from "../../api/types";
 import { ChipInput } from "../../components/ui/ChipInput";
 import { Dialog, MenuItem, Popover, useConfirm, useToast } from "../../components/ui/overlay";
-import { Badge, Button, Card, EmptyState, Field, Input, Segmented, Skeleton, Switch } from "../../components/ui/primitives";
+import { Badge, Button, Card, EmptyState, Field, Input, Notice, Segmented, Skeleton, Switch } from "../../components/ui/primitives";
+import { joinList, t, useLang } from "../../i18n";
 import { cn } from "../../lib/cn";
 
-const WEIGHTS = [
-  { value: 1, label: "低" },
-  { value: 2, label: "较低" },
-  { value: 3, label: "中" },
-  { value: 4, label: "较高" },
-  { value: 5, label: "高" },
-];
+const WEIGHT_KEYS = ["dir.w1", "dir.w2", "dir.w3", "dir.w4", "dir.w5"] as const;
+const WINDOW_CHOICES = [0, 7, 30, 90, 180, 365];
 
-type Draft = { id?: number; name: string; keywords: string[]; exclude: string[]; categories: string[]; weight: number; enabled: boolean };
-const EMPTY: Draft = { name: "", keywords: [], exclude: [], categories: [], weight: 3, enabled: true };
+type Draft = {
+  id?: number;
+  name: string;
+  keywords: string[];
+  exclude: string[];
+  categories: string[];
+  languages: string[];
+  fields: string[];
+  window_days: number | null;
+  weight: number;
+  enabled: boolean;
+};
+const EMPTY: Draft = { name: "", keywords: [], exclude: [], categories: [], languages: [], fields: [], window_days: null, weight: 3, enabled: true };
+
+const hasHan = (s: string) => /[㐀-鿿]/.test(s);
+const hasKana = (s: string) => /[぀-ヿ]/.test(s);
+const hasHangul = (s: string) => /[가-힯]/.test(s);
+
+/** What the sources can and cannot find for the keyword scripts used (CNKI etc. have no open API). */
+function CoverageNotice({ keywords, languages }: { keywords: string[]; languages: string[] }) {
+  const text = keywords.join(" ");
+  const zh = (hasHan(text) && !hasKana(text)) || languages.includes("zh");
+  const ja = hasKana(text) || languages.includes("ja");
+  const ko = hasHangul(text) || languages.includes("ko");
+  if (!zh && !ja && !ko) return null;
+  return (
+    <Notice tone="neutral" icon={<Info className="size-4" />} title={t("dir.coverage.title")}>
+      <ul className="mt-1 space-y-1 text-[13px] leading-relaxed">
+        {zh && <li>{t("dir.coverage.zh")}</li>}
+        {(ja || hasHan(text)) && <li>{t("dir.coverage.ja")}</li>}
+        {ko && <li>{t("dir.coverage.ko")}</li>}
+      </ul>
+    </Notice>
+  );
+}
+
+function ChoiceChips({ options, value, onChange }: { options: { id: string; name: string }[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {options.map((o) => {
+        const on = value.includes(o.id);
+        return (
+          <button
+            key={o.id}
+            onClick={() => onChange(on ? value.filter((x) => x !== o.id) : [...value, o.id])}
+            className={cn(
+              "rounded-lg border px-2 py-1 text-xs transition-colors",
+              on ? "border-accent bg-accent-soft text-accent-text" : "border-border text-text-2 hover:border-border-strong",
+            )}
+          >
+            {o.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function DirectionDialog({ open, initial, onClose }: { open: boolean; initial: Draft; onClose: () => void }) {
   const [d, setD] = useState<Draft>(initial);
   const [adv, setAdv] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
+  const [customWindow, setCustomWindow] = useState("");
   const { data: meta } = useMeta();
   const { data: ai } = useAiConfig();
+  const { data: settings } = useSettings();
   const { create, update } = useDirectionMutations();
   const toast = useToast();
   useEffect(() => {
     if (open) {
       setD(initial);
-      setAdv(initial.categories.length > 0 || initial.exclude.length > 0);
+      setAdv(initial.categories.length > 0 || initial.exclude.length > 0 || initial.fields.length > 0);
+      setCustomWindow("");
     }
   }, [open, initial]);
 
   const suggest = async () => {
-    if (!d.name.trim()) return toast({ tone: "info", title: "请先填写方向名称" });
+    if (!d.name.trim()) return toast({ tone: "info", title: t("dir.name_first") });
     setSuggesting(true);
     try {
-      const r = await api.post<{ keywords: string[]; exclude: string[]; categories: string[] }>("/directions/suggest", { name: d.name });
+      const r = await api.post<{ keywords: string[]; exclude: string[]; categories: string[]; fields: string[]; window_days: number | null }>(
+        "/directions/suggest",
+        { name: d.name },
+      );
       setD((x) => ({
         ...x,
         keywords: Array.from(new Set([...x.keywords, ...r.keywords])),
         exclude: x.exclude.length ? x.exclude : r.exclude,
         categories: x.categories.length ? x.categories : r.categories,
+        fields: x.fields.length ? x.fields : r.fields ?? [],
+        window_days: x.window_days ?? (r.window_days && r.window_days !== settings?.window_days ? r.window_days : null),
       }));
-      if (r.categories.length) setAdv(true);
-      toast({ tone: "success", title: `已添加 ${r.keywords.length} 个建议关键词`, description: "可以删除不需要的关键词" });
+      if (r.categories.length || r.fields?.length) setAdv(true);
+      toast({ tone: "success", title: t("dir.suggested", { n: r.keywords.length }), description: t("dir.suggested_desc") });
     } catch (e) {
-      toast({ tone: "error", title: "生成失败", description: errorMessage(e) });
+      toast({ tone: "error", title: t("dir.suggest_failed"), description: errorMessage(e) });
     } finally {
       setSuggesting(false);
     }
@@ -59,62 +118,94 @@ function DirectionDialog({ open, initial, onClose }: { open: boolean; initial: D
     const body = { ...d, name: d.name.trim() };
     const opts = {
       onSuccess: () => {
-        toast({ tone: "success", title: d.id ? "已保存修改" : "已添加研究方向" });
+        toast({ tone: "success", title: d.id ? t("dir.saved") : t("dir.added") });
         onClose();
       },
-      onError: (e: unknown) => toast({ tone: "error", title: "保存失败", description: errorMessage(e) }),
+      onError: (e: unknown) => toast({ tone: "error", title: t("common.save_failed"), description: errorMessage(e) }),
     };
     if (d.id) update.mutate({ ...body, id: d.id }, opts);
     else create.mutate(body, opts);
   };
 
+  const windowValue = d.window_days ?? 0;
+  const windowOptions = WINDOW_CHOICES.map((w) => ({ value: w, label: w === 0 ? t("dir.window.global", { n: settings?.window_days ?? 7 }) : t("today.ctl.days", { n: w }) }));
+  if (windowValue && !WINDOW_CHOICES.includes(windowValue)) windowOptions.push({ value: windowValue, label: t("today.ctl.days", { n: windowValue }) });
+
   return (
     <Dialog
       open={open}
       onClose={onClose}
-      title={d.id ? "编辑研究方向" : "添加研究方向"}
-      description="用你自己的话描述方向，再添加几个论文中常见的英文关键词即可，无需任何搜索语法。"
+      title={d.id ? t("dir.edit") : t("dir.add")}
+      description={t("dir.dialog_desc")}
       width="max-w-xl"
       footer={
         <>
           <Button variant="ghost" onClick={onClose}>
-            取消
+            {t("common.cancel")}
           </Button>
           <Button variant="primary" onClick={save} disabled={!d.name.trim()} loading={create.isPending || update.isPending}>
-            保存
+            {t("common.save")}
           </Button>
         </>
       }
     >
       <div className="space-y-5">
-        <Field label="方向名称">
-          <Input value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} placeholder="例如：多模态大模型、图神经网络、联邦学习" autoFocus />
+        <Field label={t("dir.name")}>
+          <Input value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} placeholder={t("dir.name_placeholder")} autoFocus />
         </Field>
         <Field
-          label="关键词"
+          label={t("dir.keywords")}
           extra={
             ai?.configured ? (
               <Button size="xs" variant="soft" icon={<Wand2 className="size-3.5" />} loading={suggesting} onClick={suggest}>
-                AI 推荐关键词
+                {t("dir.suggest")}
               </Button>
             ) : undefined
           }
-          hint="论文标题或摘要包含任一关键词即会被检索；标题命中权重更高。全大写的缩写（如 RAG、VLM）会区分大小写匹配。按回车添加。"
+          hint={t("dir.keywords_hint")}
         >
-          <ChipInput value={d.keywords} onChange={(v) => setD({ ...d, keywords: v })} placeholder="例如：vision-language model, RAG, contrastive learning" />
+          <ChipInput value={d.keywords} onChange={(v) => setD({ ...d, keywords: v })} placeholder={t("dir.keywords_placeholder")} />
         </Field>
-        <Field label="关注程度" hint="关注程度越高，这个方向在每日推荐中占的篇数越多。">
-          <Segmented size="sm" value={d.weight} onChange={(v) => setD({ ...d, weight: v })} options={WEIGHTS} />
+        <CoverageNotice keywords={d.keywords} languages={d.languages} />
+        <Field label={t("dir.window")} hint={t("dir.window_hint")}>
+          <div className="space-y-2">
+            <Segmented size="sm" value={windowValue} onChange={(v) => setD({ ...d, window_days: v || null })} options={windowOptions} />
+            <form
+              className="flex max-w-[260px] gap-1.5"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const n = parseInt(customWindow, 10);
+                if (n >= 1 && n <= 1095) {
+                  setD({ ...d, window_days: n });
+                  setCustomWindow("");
+                }
+              }}
+            >
+              <Input value={customWindow} onChange={(e) => setCustomWindow(e.target.value.replace(/\D/g, ""))} placeholder={t("dir.window_custom")} className="h-8" />
+              <Button size="sm" type="submit">
+                {t("common.ok")}
+              </Button>
+            </form>
+          </div>
+        </Field>
+        <Field label={t("dir.languages")} hint={t("dir.languages_hint")}>
+          <ChoiceChips options={(meta?.paper_languages ?? []).map((l) => ({ id: l.code, name: l.name }))} value={d.languages} onChange={(v) => setD({ ...d, languages: v })} />
+        </Field>
+        <Field label={t("dir.weight")} hint={t("dir.weight_hint")}>
+          <Segmented size="sm" value={d.weight} onChange={(v) => setD({ ...d, weight: v })} options={WEIGHT_KEYS.map((k, i) => ({ value: i + 1, label: t(k) }))} />
         </Field>
         <button onClick={() => setAdv(!adv)} className="flex items-center gap-1 text-xs text-text-3 hover:text-text">
-          <ChevronDown className={cn("size-3.5 transition-transform", adv && "rotate-180")} /> 排除关键词与学科分类（可选）
+          <ChevronDown className={cn("size-3.5 transition-transform", adv && "rotate-180")} /> {t("dir.advanced")}
         </button>
         {adv && (
           <div className="space-y-5">
-            <Field label="排除关键词" hint="标题或摘要包含这些词的论文不会被推荐到这个方向。">
-              <ChipInput tone="danger" value={d.exclude} onChange={(v) => setD({ ...d, exclude: v })} placeholder="例如：medical, survey" />
+            <Field label={t("dir.fields")} hint={t("dir.fields_hint")}>
+              <ChoiceChips options={meta?.fields ?? []} value={d.fields} onChange={(v) => setD({ ...d, fields: v })} />
             </Field>
-            <Field label="arXiv 学科分类" hint="限定 arXiv 检索范围，可减少无关领域的结果。不选则不限分类。">
+            <Field label={t("dir.exclude")} hint={t("dir.exclude_hint")}>
+              <ChipInput tone="danger" value={d.exclude} onChange={(v) => setD({ ...d, exclude: v })} placeholder={t("dir.exclude_placeholder")} />
+            </Field>
+            <Field label={t("dir.categories")} hint={t("dir.categories_hint")}>
               <div className="flex flex-wrap gap-1.5">
                 {meta?.arxiv_categories.map((c) => {
                   const on = d.categories.includes(c.id);
@@ -146,6 +237,7 @@ export function DirectionsSection() {
   const { update, remove, addPresets } = useDirectionMutations();
   const confirm = useConfirm();
   const toast = useToast();
+  const { lang } = useLang();
   const [params, setParams] = useSearchParams();
   const [dialog, setDialog] = useState<Draft | null>(null);
 
@@ -160,35 +252,46 @@ export function DirectionsSection() {
   if (isLoading) return <Skeleton className="h-64 rounded-2xl" />;
   const existing = new Set((data ?? []).map((d) => d.name));
   const presetsLeft = (meta?.direction_presets ?? []).filter((p) => !existing.has(p.name));
+  const fieldName = (id: string) => meta?.fields.find((f) => f.id === id)?.name ?? id;
+  const langName = (code: string) => meta?.paper_languages.find((l) => l.code === code)?.name ?? code;
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="primary" icon={<Plus className="size-4" />} onClick={() => setDialog(EMPTY)}>
-          添加研究方向
+          {t("dir.add")}
         </Button>
         {presetsLeft.length > 0 && (
           <Popover
-            className="w-[280px]"
+            className="max-h-[420px] w-[300px] overflow-y-auto"
             trigger={({ toggle }) => (
               <Button icon={<Sparkles className="size-4" />} onClick={toggle}>
-                从预设添加
+                {t("dir.from_preset")}
               </Button>
             )}
           >
             {(close) =>
-              presetsLeft.map((p) => (
-                <MenuItem
-                  key={p.key}
-                  hint={p.name_en}
-                  onClick={() => {
-                    close();
-                    addPresets.mutate([p.key], { onSuccess: () => toast({ tone: "success", title: `已添加「${p.name}」` }) });
-                  }}
-                >
-                  {p.name}
-                </MenuItem>
-              ))
+              (meta?.preset_groups ?? []).map((g) => {
+                const items = presetsLeft.filter((p) => p.group === g.id);
+                if (!items.length) return null;
+                return (
+                  <div key={g.id}>
+                    <div className="px-2.5 pb-1 pt-2 text-[11px] font-medium text-text-3">{g.name}</div>
+                    {items.map((p) => (
+                      <MenuItem
+                        key={p.key}
+                        hint={lang !== "en" ? p.name_en : undefined}
+                        onClick={() => {
+                          close();
+                          addPresets.mutate([p.key], { onSuccess: () => toast({ tone: "success", title: t("dir.preset_added", { name: p.name }) }) });
+                        }}
+                      >
+                        {p.name}
+                      </MenuItem>
+                    ))}
+                  </div>
+                );
+              })
             }
           </Popover>
         )}
@@ -196,7 +299,7 @@ export function DirectionsSection() {
 
       {!data?.length ? (
         <Card>
-          <EmptyState icon={<Compass className="size-6" />} title="还没有研究方向" description="添加你关注的研究方向，PaperLook 会据此每天挑选论文。" />
+          <EmptyState icon={<Compass className="size-6" />} title={t("dir.empty")} description={t("dir.empty_desc")} />
         </Card>
       ) : (
         data.map((d: Direction) => (
@@ -205,8 +308,9 @@ export function DirectionsSection() {
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-[15px] font-semibold text-text">{d.name}</h3>
-                  <Badge tone="neutral">关注度：{WEIGHTS[d.weight - 1]?.label}</Badge>
-                  {!d.enabled && <Badge tone="outline">已停用</Badge>}
+                  <Badge tone="neutral">{t("dir.weight_badge", { level: t(WEIGHT_KEYS[d.weight - 1] ?? "dir.w3") })}</Badge>
+                  {d.window_days ? <Badge tone="outline">{t("dir.window_badge", { n: d.window_days })}</Badge> : null}
+                  {!d.enabled && <Badge tone="outline">{t("dir.disabled")}</Badge>}
                 </div>
                 <div className="mt-2.5 flex flex-wrap gap-1.5">
                   {d.keywords.length ? (
@@ -216,26 +320,28 @@ export function DirectionsSection() {
                       </span>
                     ))
                   ) : (
-                    <span className="text-xs text-text-3">没有关键词（仅按学科分类检索 arXiv）</span>
+                    <span className="text-xs text-text-3">{t("dir.no_keywords")}</span>
                   )}
                 </div>
-                {(d.exclude.length > 0 || d.categories.length > 0) && (
+                {(d.exclude.length > 0 || d.categories.length > 0 || d.languages.length > 0 || d.fields.length > 0) && (
                   <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-3">
-                    {d.exclude.length > 0 && <span>排除：{d.exclude.join("、")}</span>}
-                    {d.categories.length > 0 && <span className="font-mono">arXiv：{d.categories.join(" ")}</span>}
+                    {d.languages.length > 0 && <span>{t("dir.languages_line", { list: joinList(d.languages.map(langName)) })}</span>}
+                    {d.fields.length > 0 && <span>{t("dir.fields_line", { list: joinList(d.fields.map(fieldName)) })}</span>}
+                    {d.exclude.length > 0 && <span>{t("dir.exclude_line", { list: joinList(d.exclude) })}</span>}
+                    {d.categories.length > 0 && <span className="font-mono">arXiv: {d.categories.join(" ")}</span>}
                   </div>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
-                <Switch checked={d.enabled} onChange={(v) => update.mutate({ id: d.id, enabled: v })} label="启用" />
-                <button className="ml-2 rounded-lg p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" onClick={() => setDialog({ ...d })} aria-label="编辑">
+                <Switch checked={d.enabled} onChange={(v) => update.mutate({ id: d.id, enabled: v })} label={t("dir.enable")} />
+                <button className="ml-2 rounded-lg p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" onClick={() => setDialog({ ...d })} aria-label={t("common.edit")}>
                   <Pencil className="size-4" />
                 </button>
                 <button
                   className="rounded-lg p-1.5 text-text-3 hover:bg-danger-soft hover:text-danger"
-                  aria-label="删除"
+                  aria-label={t("common.delete")}
                   onClick={async () => {
-                    if (await confirm({ title: `删除「${d.name}」？`, description: "已推荐过的论文和 AI 分析结果会保留。", confirmText: "删除", danger: true })) remove.mutate(d.id);
+                    if (await confirm({ title: t("dir.delete_q", { name: d.name }), description: t("dir.delete_desc"), confirmText: t("common.delete"), danger: true })) remove.mutate(d.id);
                   }}
                 >
                   <Trash2 className="size-4" />

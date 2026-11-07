@@ -8,13 +8,16 @@ from typing import Any
 from . import db
 
 DEFAULT_SETTINGS: dict[str, Any] = {
+    # Interface language: zh | en | ja | ko; "" = not chosen yet (the interface then follows the system language).
+    "language": "",
     "daily_count": 5,
     "window_days": 7,
     # How strongly newer papers are favoured inside the window (half-life of the freshness decay).
     "time_preference": "balanced",  # latest | balanced | relaxed
     "ranking_preset": "balanced",  # balanced | relevance | quality | fresh | custom
-    "weights": {"relevance": 0.55, "quality": 0.25, "freshness": 0.20},
-    "sources": {"arxiv": True, "openalex": True, "semantic_scholar": False, "pubmed": False},
+    "weights": {"relevance": 0.50, "quality": 0.30, "freshness": 0.20},
+    # CiNii Research only runs for directions with Japanese/Chinese keywords (see sources/cinii.py).
+    "sources": {"arxiv": True, "openalex": True, "cinii": True, "semantic_scholar": False, "pubmed": False},
     "signals": {"hf_daily": True},
     # Optional DeepSeek re-ranking of the candidate pool. Off by default: costs tokens.
     "ai_rerank": False,
@@ -22,6 +25,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "auto_fetch_on_open": False,
     # Let the user's feedback (stars, notes, "not interested") adjust the order of candidates.
     "personalize": True,
+    # Rank surveys, reviews and tutorials a little higher (handy when learning a new field).
+    "prefer_reviews": False,
     "ai": {
         "provider": "deepseek",  # deepseek | gemini
         # DeepSeek (kept at the top level of "ai" for compatibility with 1.0 settings and backups)
@@ -36,6 +41,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
             "free_tier": True,
         },
         "thinking_for_analysis": False,
+        # Language of translations and AI analyses: "auto" = the interface language, or zh | en | ja | ko.
+        "output_language": "auto",
         "features": {"translate": True, "summary": True, "modules": True, "contributions": True},
         "translate_appendix": True,
         "keep_english_terms": True,
@@ -46,7 +53,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 RANKING_PRESETS: dict[str, dict[str, float]] = {
-    "balanced": {"relevance": 0.55, "quality": 0.25, "freshness": 0.20},
+    "balanced": {"relevance": 0.50, "quality": 0.30, "freshness": 0.20},
     "relevance": {"relevance": 0.70, "quality": 0.15, "freshness": 0.15},
     "quality": {"relevance": 0.45, "quality": 0.40, "freshness": 0.15},
     "fresh": {"relevance": 0.45, "quality": 0.15, "freshness": 0.40},
@@ -98,6 +105,9 @@ def _validate(s: dict) -> dict:
             w = {"relevance": 0.2, "quality": 0.8 * w["quality"] / rest, "freshness": 0.8 * w["freshness"] / rest}
         s["weights"] = {k: round(v, 4) for k, v in w.items()}
     s["personalize"] = bool(s.get("personalize", True))
+    s["prefer_reviews"] = bool(s.get("prefer_reviews", False))
+    lang = str(s.get("language") or "").strip().lower()
+    s["language"] = lang if lang in ("zh", "en", "ja", "ko") else ""
     ai = s["ai"]
     ai["concurrency"] = int(_clamp(ai.get("concurrency"), 1, 8, 4))
     base_url = str(ai.get("base_url") or "").strip().rstrip("/")
@@ -105,6 +115,8 @@ def _validate(s: dict) -> dict:
     ai["model"] = str(ai.get("model") or d["ai"]["model"]).strip()
     if ai.get("provider") not in ("deepseek", "gemini"):
         ai["provider"] = "deepseek"
+    if ai.get("output_language") not in ("auto", "zh", "en", "ja", "ko"):
+        ai["output_language"] = "auto"
     g, dg = ai["gemini"], d["ai"]["gemini"]
     g["model"] = str(g.get("model") or dg["model"]).strip().removeprefix("models/")
     g["base_url"] = str(g.get("base_url") or "").strip().rstrip("/") or dg["base_url"]
@@ -114,6 +126,7 @@ def _validate(s: dict) -> dict:
         s["reading"]["theme"] = "system"
     if s["reading"].get("font_size") not in ("sm", "md", "lg"):
         s["reading"]["font_size"] = "md"
+    # translation_view: bilingual | zh (translation only) | en (original only) - names kept from 1.x
     if s["reading"].get("translation_view") not in ("bilingual", "zh", "en"):
         s["reading"]["translation_view"] = "bilingual"
     return s
@@ -136,7 +149,9 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (_KEY, db.dumps(merged)),
         )
-        return merged
+    from . import i18n
+    i18n.invalidate()
+    return merged
 
 
 def replace_settings(value: dict[str, Any]) -> dict[str, Any]:
@@ -147,7 +162,9 @@ def replace_settings(value: dict[str, Any]) -> dict[str, Any]:
             "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (_KEY, db.dumps(merged)),
         )
-        return merged
+    from . import i18n
+    i18n.invalidate()
+    return merged
 
 
 def half_life_days(settings: dict[str, Any]) -> float:

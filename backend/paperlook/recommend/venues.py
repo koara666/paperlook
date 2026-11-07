@@ -1,19 +1,26 @@
 """Curated list of well-established venues, used as ONE quality signal.
 
 A venue match is reported as a verifiable fact ("authors state: accepted at CVPR 2026"), never as a
-rating of the individual paper. Tiers loosely follow CCF-A / CORE A* conventions:
-  A -> 1.0   B -> 0.75   Findings -> 0.7   Workshop -> 0.4
-Extend VENUES freely; each entry: (canonical, tier, acronym regex (case-sensitive) | None,
-full-name regex (case-insensitive) | None, anchored full-name (whole venue string) bool).
+rating of the individual paper. Tiers: A = flagship venues of a field (for CS loosely CCF-A / CORE A*),
+B = well-established leading venues:
+  A -> 1.0   B -> 0.8   Findings -> 0.7   Workshop -> 0.4
+VENUES covers computer science; venue_lists.py the other disciplines and Chinese/Japanese/Korean journals.
+Each entry: (canonical, tier, acronym regex (case-sensitive) | None, full-name regex (case-insensitive) | None,
+anchored) - anchored False: the name may appear anywhere (also in author comments); True: the whole venue
+string; "name": the venue string starts with the name, optionally followed by a subtitle, edition or publisher.
+canonical "*" displays the venue string itself (journal families such as "Nature …", "IEEE Transactions on …").
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
-TIER_SCORE = {"A": 1.0, "B": 0.75, "findings": 0.7, "workshop": 0.4}
+from .venue_lists import CJK_VENUES, FIELD_VENUES
 
-VENUES: list[tuple[str, str, str | None, str | None, bool]] = [
+TIER_SCORE = {"A": 1.0, "B": 0.8, "findings": 0.7, "workshop": 0.4}
+
+VENUES: list[tuple[str, str, str | None, str | None, bool | str]] = [
     # Computer vision
     ("CVPR", "A", r"CVPR", r"computer vision and pattern recognition", False),
     ("ICCV", "A", r"ICCV", r"international conference on computer vision", False),
@@ -113,12 +120,9 @@ VENUES: list[tuple[str, str, str | None, str | None, bool]] = [
     ("MICCAI", "B", r"MICCAI", r"medical image computing and computer.assisted intervention", False),
     ("Medical Image Analysis", "B", r"MedIA", r"medical image analysis", True),
     ("IEEE TMI", "B", None, r"transactions on medical imaging", False),
-    # General science
-    ("Nature", "A", None, r"nature", True),
-    ("Science", "A", None, r"science", True),
-    ("PNAS", "A", r"PNAS", r"proceedings of the national academy of sciences", False),
-    ("Nature Communications", "B", None, r"nature communications", False),
-    ("Science Advances", "B", None, r"science advances", False),
+    # Surveys (good starting points for learning a field)
+    ("ACM Computing Surveys", "A", None, r"acm computing surveys", False),
+    ("IEEE Communications Surveys & Tutorials", "A", None, r"communications surveys (?:&|and) tutorials", False),
 ]
 
 
@@ -138,14 +142,19 @@ class VenueMatch:
 
 def _compile():
     out = []
-    for canonical, tier, acr, full, anchored in VENUES:
+    for canonical, tier, acr, full, anchored in VENUES + FIELD_VENUES + CJK_VENUES:
         # "CVPRW"/"ICCVW" style workshop acronyms are captured by the optional W group.
         w_suffix = "" if canonical == "WWW" else "(?P<w>W)?"
         acr_re = re.compile(rf"(?<![A-Za-z])(?:{acr}){w_suffix}(?![A-Za-z])") if acr else None
-        if full:
-            full_re = re.compile(rf"^\s*(?:the\s+)?{full}\s*$" if anchored else full, re.I)
-        else:
+        if not full:
             full_re = None
+        elif anchored == "name":
+            # 史学雑誌 / 史学会 編, 中国科学：信息科学, 社会学評論 (Japanese Sociological Review) …
+            full_re = re.compile(rf"^\s*(?:{full})\s*(?:$|[(（:：/／=＝,，.．·・\-—\s])", re.I)
+        elif anchored:
+            full_re = re.compile(rf"^\s*(?:the\s+)?(?:{full})\.?\s*(?:[(（].*)?$", re.I)
+        else:
+            full_re = re.compile(full, re.I)
         out.append((canonical, tier, acr_re, full_re, anchored))
     return out
 
@@ -169,8 +178,16 @@ def _match_any(text: str, use_full_anchored: bool = False):
                 if m.groupdict().get("w"):
                     tier = "workshop"
                 return canonical, tier, acr_re
-        if full_re is not None and (not anchored or use_full_anchored) and full_re.search(text):
-            return canonical, tier, full_re
+        if full_re is not None and (not anchored or use_full_anchored):
+            m = full_re.search(text)
+            if m:
+                if canonical == "*" or (anchored == "name" and use_full_anchored):
+                    # A journal family, or a CJK journal: show the journal's own name (without the publisher
+                    # or a repeated title: "史學雜誌 / 史学会 編", "Physical review. B./Physical review. B").
+                    shown = text if anchored or use_full_anchored else m.group(0)
+                    shown = re.split(r"\s*[/／=＝]\s*", shown.strip())[0].strip(" .")
+                    canonical = shown.title() if shown.islower() else shown
+                return canonical, tier, full_re
     return None
 
 
@@ -202,6 +219,7 @@ def venue_from_name(venue: str | None) -> VenueMatch | None:
     """Match a venue string from OpenAlex / Semantic Scholar / PubMed metadata."""
     if not venue:
         return None
+    venue = unicodedata.normalize("NFKC", venue).strip()
     m = _match_any(venue, use_full_anchored=True)
     if not m:
         return None

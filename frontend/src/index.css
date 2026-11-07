@@ -79,9 +79,23 @@
   --shadow-card: var(--shadow);
   --shadow-soft: var(--shadow-sm);
   --shadow-pop: var(--shadow-lg);
-  --font-sans: "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
-  --font-serif: "Source Serif 4 Variable", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+  --font-sans: var(--pl-sans);
+  --font-serif: var(--pl-serif);
   --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", Consolas, monospace;
+}
+
+/* ---------- fonts: CJK glyphs follow the language (interface language, or a lang="…" on paper text) ---------- */
+:root {
+  --pl-sans: "Inter Variable", "PingFang SC", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+  --pl-serif: "Source Serif 4 Variable", "Noto Serif SC", "Source Han Serif SC", Georgia, serif;
+}
+:lang(ja) {
+  --pl-sans: "Inter Variable", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", system-ui, sans-serif;
+  --pl-serif: "Source Serif 4 Variable", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", Georgia, serif;
+}
+:lang(ko) {
+  --pl-sans: "Inter Variable", "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", system-ui, sans-serif;
+  --pl-serif: "Source Serif 4 Variable", "Noto Serif KR", "Batang", Georgia, serif;
 }
 
 /* ---------- base ---------- */
@@ -98,7 +112,7 @@ body {
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-sans);
+  font-family: var(--pl-sans);
   font-feature-settings: "cv11", "ss01";
 }
 ::selection {
@@ -145,11 +159,11 @@ button:disabled {
   --reader-size: 19px;
 }
 .reader .orig {
-  font-family: var(--font-serif);
+  font-family: var(--pl-serif);
   line-height: 1.72;
 }
 .reader .zh {
-  font-family: var(--font-sans);
+  font-family: var(--pl-sans);
   line-height: 1.9;
   letter-spacing: 0.01em;
 }

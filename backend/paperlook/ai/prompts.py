@@ -1,147 +1,220 @@
-"""All prompts in one place. Outputs are JSON so the UI can render structured, consistent results."""
+"""All prompts in one place. Outputs are JSON so the UI can render structured, consistent results.
+
+Instructions are written in English and name the output language explicitly (zh/en/ja/ko - the interface
+language, or settings.ai.output_language). Papers can be in any language and from any discipline, so the
+prompts never assume an English source or a computer-science paper. Enumerated fields (paper type, module
+category …) are returned as English codes that the interface translates.
+"""
 from __future__ import annotations
 
-ANALYSIS_SYSTEM = """你是一名严谨的科研助理，帮助研究者快速、准确地理解学术论文。必须遵守：
-- 只依据提供的论文内容作答；论文没有提到的信息写"论文未明确说明"，绝不编造数据集、指标、数值、作者观点或结论。
-- 使用简体中文；方法名、模型名、数据集名、指标名等专有名词保留英文原文。
-- 表述具体、信息密度高，避免空泛套话；引用数值时与原文严格一致。
-- 文字字段中出现数学符号或公式时，一律用 $...$ 包裹并写标准 LaTeX（例如 $\\hat{Y}_S(x)$、$\\frac{1}{2}$），LaTeX 命令的反斜杠不能省略，也不要在 $...$ 之外写 LaTeX 命令；明确要求"不要包含 $ 符号"的字段除外。
-- 只输出一个符合要求结构的 JSON 对象，不要输出其他内容。"""
+from .. import settings_store
+from ..i18n import LANGS, current
 
-ABSTRACT_ONLY_NOTE = """【重要】当前无法获取论文全文，只能看到标题和摘要。请仅依据摘要作答：
-摘要未涉及的内容（如具体实验设置、数值、模块细节）一律写"摘要未提及，需阅读全文"，不要推测细节。"""
+# How each output language is named inside the prompts, and its register.
+LANGUAGE = {"zh": "Simplified Chinese (简体中文)", "en": "English", "ja": "Japanese (日本語)", "ko": "Korean (한국어)"}
+STYLE = {
+    "zh": "Use standard Simplified Chinese academic prose.",
+    "en": "Use clear, precise academic English.",
+    "ja": "Use formal written Japanese for academic texts (である調).",
+    "ko": "Use formal Korean academic prose (-다 style).",
+}
+NOT_STATED = {"zh": "论文未明确说明", "en": "Not stated in the paper", "ja": "論文中に明記されていない",
+              "ko": "논문에 명시되어 있지 않음"}
+ABSTRACT_ONLY = {"zh": "摘要未提及，需阅读全文", "en": "Not in the abstract; see the full text",
+                 "ja": "要旨に記載なし（本文を参照）", "ko": "초록에 없음(본문 참조)"}
+# Source-language names for translation prompts (ISO 639-1 -> English name).
+SOURCE_NAMES = {"en": "English", "zh": "Chinese", "ja": "Japanese", "ko": "Korean", "de": "German", "fr": "French",
+                "es": "Spanish", "pt": "Portuguese", "it": "Italian", "ru": "Russian", "nl": "Dutch", "id": "Indonesian",
+                "vi": "Vietnamese", "th": "Thai", "ar": "Arabic", "tr": "Turkish", "pl": "Polish", "uk": "Ukrainian",
+                "el": "Greek", "hi": "Hindi"}
+TERM_EXAMPLE = {"zh": "对比学习（contrastive learning）", "ja": "対照学習（contrastive learning）",
+                "ko": "대조 학습(contrastive learning)", "en": "the imperial examination (keju 科举)"}
 
-SUMMARY_TASK = """请对上面的论文进行结构化总结，帮助读者快速判断这篇论文是否值得精读。
 
-输出 JSON，结构如下：
-{
-  "tldr": "一句话概括论文做了什么、效果如何（不超过 70 字）",
-  "paper_type": "从以下选择一个：方法创新 / 系统构建 / 实证研究 / 数据集与基准 / 综述 / 理论分析 / 立场与观点 / 其他",
-  "problem": {
-    "question": "论文要解决的具体问题",
-    "importance": "为什么这个问题值得研究（现有方法的不足、现实需求等）"
-  },
-  "method": {
-    "overview": "技术路线概述（3-5 句）",
-    "core_idea": "核心思想或关键洞察",
-    "relation_to_prior": "与已有方法的关系和区别"
-  },
-  "experiments": {
-    "datasets": ["使用的数据集或实验环境"],
-    "metrics": ["评价指标"],
-    "main_results": ["主要实验结果，尽量包含具体数值和对比对象"],
-    "evidence_assessment": "实验是否充分支撑论文结论，给出理由（例如是否有消融实验、对比是否公平、规模是否足够）"
-  },
-  "conclusions": ["论文的主要结论"],
-  "highlights": ["值得关注的亮点（2-4 条）"],
+def output_language() -> str:
+    """Language of AI output: settings.ai.output_language, or the interface language when 'auto'."""
+    lang = settings_store.get_settings()["ai"].get("output_language")
+    return lang if lang in LANGS else current()
+
+
+def source_name(code: str | None) -> str:
+    return SOURCE_NAMES.get(code or "", "the original language")
+
+
+def analysis_system(lang: str) -> str:
+    return f"""You are a rigorous research assistant who helps researchers understand academic papers quickly and accurately. Rules:
+- Answer only from the provided paper. If the paper does not state something, write "{NOT_STATED[lang]}" - never invent datasets, metrics, numbers, sources, authors' opinions or conclusions.
+- Write every text field in {LANGUAGE[lang]}, whatever language the paper is written in. {STYLE[lang]} Keep names of methods, models, datasets, metrics, archives and editions as they appear in the paper.
+- The paper may come from any discipline - natural sciences, engineering, medicine, social sciences or humanities. Adapt to its genre: for a humanities or social-science paper, "method" means its approach, sources and argument (archival research, close reading, philology, fieldwork, interviews, econometric identification …) and "experiments" means the evidence it uses.
+- When the paper quotes classical or historical language (Classical Chinese, kanbun, Middle Korean, Latin, Old English …), keep the original wording character for character (never convert between simplified, traditional and Japanese character forms) and add a modern {LANGUAGE[lang]} rendering in parentheses wherever you use such a quotation.
+- Be specific and information-dense; avoid generic filler. Quote numbers exactly as in the paper.
+- In text fields, wrap every mathematical symbol or formula in $...$ and write standard LaTeX (e.g. $\\hat{{Y}}_S(x)$, $\\frac{{1}}{{2}}$). Never drop the backslashes of LaTeX commands and never write LaTeX commands outside $...$ - except in fields that explicitly say not to include $.
+- Output exactly one JSON object with the required structure and nothing else."""
+
+
+def abstract_only_note(lang: str) -> str:
+    return (f"[Important] The full text is not available - only the title and abstract. Answer from the abstract only: "
+            f"for anything the abstract does not cover (experimental setup, numbers, module details, sources) write "
+            f"\"{ABSTRACT_ONLY[lang]}\" and do not guess.")
+
+
+def summary_task(lang: str) -> str:
+    return f"""Write a structured summary of the paper above that lets a reader decide quickly whether it is worth reading closely. All text in {LANGUAGE[lang]}.
+
+Output JSON with this structure:
+{{
+  "tldr": "one sentence: what the paper does and what it finds (at most ~40 words)",
+  "paper_type": "one code: method | system | empirical | dataset | survey | theory | position | humanities | other  (humanities = historical, philological, literary, philosophical or other interpretive scholarship)",
+  "problem": {{
+    "question": "the specific question or problem the paper addresses",
+    "importance": "why it matters (gaps in prior work, practical or scholarly need)"
+  }},
+  "method": {{
+    "overview": "the approach in 3-5 sentences (for humanities: sources, method and line of argument)",
+    "core_idea": "the core idea or key insight",
+    "relation_to_prior": "how it relates to and differs from prior work"
+  }},
+  "experiments": {{
+    "datasets": ["datasets, experimental settings, corpora or primary sources used"],
+    "metrics": ["evaluation metrics or criteria (empty if not applicable)"],
+    "main_results": ["main results or findings, with concrete numbers and comparisons where the paper gives them"],
+    "evidence_assessment": "whether the evidence supports the conclusions, with reasons (ablations, fair comparisons, scale; for humanities: quality and range of sources, counter-evidence considered)"
+  }},
+  "conclusions": ["the paper's main conclusions"],
+  "highlights": ["2-4 points worth noticing"],
   "limitations": [
-    {"point": "局限性", "source": "author 或 ai"}
+    {{"point": "a limitation", "source": "author or ai"}}
   ],
-  "reading_advice": {
-    "audience": ["适合哪些研究方向的读者"],
-    "priority_sections": [{"section": "章节名（与论文一致）", "reason": "为什么值得优先阅读"}],
-    "quick_path": "希望快速理解本文的读者应该按什么顺序重点看哪些部分"
-  }
-}
-说明：limitations 中 source=author 表示作者在文中承认的局限，source=ai 表示你根据内容做出的评估。不适用的字段用空数组或"论文未明确说明"。"""
+  "reading_advice": {{
+    "audience": ["which readers or research areas benefit most"],
+    "priority_sections": [{{"section": "section name as in the paper", "reason": "why to read it first"}}],
+    "quick_path": "in which order a reader in a hurry should read which parts"
+  }}
+}}
+In limitations, source=author means the authors acknowledge it; source=ai means it is your own assessment. Use empty arrays or "{NOT_STATED[lang]}" for fields that do not apply."""
 
-MODULES_TASK = """请识别并分析这篇论文中的关键技术模块，帮助读者理解方法的整体结构与各部分的协作方式。
 
-如果论文本身不包含可拆分的技术模块（例如综述、纯理论推导、立场论文、纯实证分析），请将 applicable 设为 false 并说明原因，
-同时在 structure 中按顺序梳理论文的核心论证结构。不要为了填充模板而编造不存在的模块。
+def modules_task(lang: str) -> str:
+    return f"""Identify and analyse the key technical modules of this paper so the reader understands the overall structure and how the parts work together. All text in {LANGUAGE[lang]}.
 
-输出 JSON，结构如下：
-{
+If the paper has no separable technical modules (e.g. a survey, a purely theoretical derivation, a position paper, a purely empirical study, or humanities scholarship), set applicable to false, explain why, and list the core steps of its argument in order in "structure". Never invent modules just to fill the template.
+
+Output JSON with this structure:
+{{
   "applicable": true,
-  "reason": "applicable 为 false 时说明原因，否则为空字符串",
-  "overview": "整体架构或流程概述（3-6 句）",
+  "reason": "why applicable is false; otherwise an empty string",
+  "overview": "overall architecture or workflow in 3-6 sentences",
   "modules": [
-    {
-      "name": "模块中文名",
-      "name_en": "论文中的英文名称（没有则为空字符串）",
-      "category": "从以下选择：整体架构 / 核心算法 / 特征提取 / 数据处理 / 训练策略 / 推理流程 / 损失函数 / 数学方法 / 评估方法 / 其他",
-      "role": "该模块负责什么",
-      "inputs": "输入",
-      "outputs": "输出",
-      "mechanism": "具体工作原理（具体、可操作，不要泛泛而谈）",
-      "key_formula": "最关键的一个公式，使用标准 LaTeX（保留反斜杠，如 \\frac、\\mathbf），不要包含 $ 符号；没有则为空字符串",
-      "novelty": "new（本文提出）/ adapted（改进已有方法）/ existing（直接使用已有方法）",
-      "section": "对应的论文章节"
-    }
+    {{
+      "name": "module name in {LANGUAGE[lang]}",
+      "name_en": "the module's name as written in the paper (empty string if none)",
+      "category": "one code: architecture | algorithm | feature_extraction | data_processing | training | inference | loss | math | evaluation | other",
+      "role": "what the module is responsible for",
+      "inputs": "inputs",
+      "outputs": "outputs",
+      "mechanism": "how it works, concretely and specifically",
+      "key_formula": "the single most important formula in standard LaTeX (keep the backslashes, e.g. \\frac, \\mathbf), without $ signs; empty string if none",
+      "novelty": "new (proposed in this paper) / adapted (an improved existing method) / existing (used as is)",
+      "section": "the corresponding section of the paper"
+    }}
   ],
-  "flow": [{"from": "模块名", "to": "模块名", "description": "数据或信息如何在两者之间流动"}],
-  "structure": ["仅当 applicable 为 false 时填写：论文的核心论证步骤"],
-  "design_insights": ["关键设计选择及其动机"]
-}
-模块按数据流或重要性排序，通常 3-8 个。"""
-
-CONTRIBUTIONS_TASK = """请提取这篇论文的主要贡献与创新点。必须严格区分三种来源，绝不能把推断当作作者声明：
-
-1. explicit —— 作者在论文中明确声明的贡献（通常位于摘要或引言末尾的 "our contributions are..."）。
-   每条必须附上能支撑它的原文英文句子，逐字摘录，不得改写或拼接，并注明所在章节。
-2. derived —— 你根据论文内容（方法、实验、分析）归纳出的贡献，作者未必逐条声明。注明依据。
-3. inferred —— 你推断的潜在价值或影响（例如可能的应用场景、对后续研究的启发）。这属于推测，必须写明推断理由。
-
-输出 JSON，结构如下：
-{
-  "problem_solved": "论文解决的核心问题（中文概括）",
-  "explicit": [{"claim": "贡献（中文概括）", "quote": "支撑该贡献的原文句子（英文逐字摘录）", "section": "章节"}],
-  "derived": [{"point": "归纳出的贡献", "basis": "依据（章节、实验或图表）"}],
-  "improvements": [{"aspect": "相比已有方法的改进点", "detail": "具体说明", "evidence": "支撑证据（尽量含数值和对比对象）"}],
-  "new_methods": [{"name": "本文新提出的方法/模型/数据集/指标的名称", "description": "简述"}],
-  "experimental_support": [{"claim": "被实验支持的结论", "evidence": "实验证据", "strength": "strong / moderate / weak"}],
-  "inferred": [{"point": "潜在价值", "rationale": "推断理由"}]
-}"""
-
-ABSTRACT_TRANSLATION_SYSTEM = """你是资深学术翻译。把英文论文标题和摘要翻译成准确、流畅的简体中文学术表述。
-保留 LaTeX 公式（$...$）、引用标记和模型/数据集名称原样。只输出 JSON：{"title_zh": "...", "abstract_zh": "..."}"""
+  "flow": [{{"from": "module name", "to": "module name", "description": "how data or information flows between them"}}],
+  "structure": ["only when applicable is false: the core steps of the argument"],
+  "design_insights": ["key design choices and their motivation"]
+}}
+Order modules by data flow or importance; usually 3-8."""
 
 
-def translation_system(keep_english_terms: bool) -> str:
-    term_rule = ("重要术语首次出现时，在中文译名后用括号保留英文原词，例如：对比学习（contrastive learning）；之后直接使用中文译名。"
-                 if keep_english_terms else "术语直接使用中文译名，无需保留英文原词。")
-    return f"""你是一名资深的学术论文翻译专家，负责将英文科研论文翻译为准确、流畅、符合中文学术写作规范的简体中文。
+def contributions_task(lang: str) -> str:
+    return f"""Extract the main contributions and novel points of this paper. Strictly separate three kinds of statements and never present an inference as the authors' claim. All text in {LANGUAGE[lang]} except the quotes.
 
-翻译规则：
-1. 忠实原文：完整翻译每一句话，不增删、不总结、不解释、不遗漏任何信息。
-2. 公式占位符：形如 ⟦M1⟧、⟦M2⟧ 的标记代表数学公式。必须把每个占位符原样保留在译文中语义对应的位置，不得修改、翻译、合并或删除。
-3. 引用标记保持原样，例如 [12]、[3, 5]、(Smith et al., 2023)。
-4. 术语：严格遵循给定的术语表，全文保持一致。{term_rule}
-5. 专有名词：模型名、数据集名、方法缩写、代码标识符、URL 保持英文原样（如 CLIP、ImageNet、ResNet-50）。
-6. kind 为 title 的条目是章节标题，译为简洁的中文标题，不要添加编号；kind 为 caption 的条目是图表说明。
-7. 输出格式：只输出 JSON 对象 {{"translations": [{{"id": "<原 id>", "text": "<译文>"}}]}}。每个输入 id 必须恰好对应一条译文，顺序与输入一致。"""
+1. explicit - contributions the authors state themselves (usually in the abstract or at the end of the introduction, e.g. "our contributions are …"). Each must come with a supporting sentence copied verbatim from the paper in the paper's own language - never translated, rephrased or stitched together - and its section.
+2. derived - contributions you derive from the content (method, experiments, analysis, sources) that the authors do not necessarily list. Give the basis.
+3. inferred - potential value or impact you infer (possible applications, implications for later research). This is speculation: always give your reasoning.
 
-
-GLOSSARY_SYSTEM = """你是科研领域的术语专家，擅长确定英文学术术语的规范中文译法。只输出 JSON。"""
-
-GLOSSARY_TASK = """根据以下论文的标题、摘要和章节标题，提取 15-40 个对理解和翻译本文最关键的专业术语（核心概念、方法名、任务名、重要技术词汇），
-并给出规范、通用的中文译法。
-- 通常保留英文的专有名词（模型名、数据集名、缩写，如 Transformer、CLIP、ViT）：zh 填英文原文，keep 设为 true。
-- 其余术语 keep 为 false。
-- zh 只能是完整的规范中文译法或英文原文，不要中英混杂或半音译。以人名命名的术语：人名有通用中文译名的用译名（如 Gaussian → 高斯），没有的保留英文人名（如 Householder reflection → Householder 反射）。
-输出 JSON：{"terms": [{"en": "英文术语", "zh": "中文译法", "keep": false}]}"""
-
-RERANK_SYSTEM = """你是科研文献筛选助手。根据用户的研究方向，评估每篇候选论文与这些方向的相关程度和阅读价值。
-评分要客观：只因关键词偶然重合而主题不符的论文应给低分。只输出 JSON。"""
-
-RERANK_TASK = """对每篇候选论文输出：
-- relevance：0-10 的整数。10 = 与某个研究方向高度契合且很值得阅读；5 = 部分相关；0 = 无关。
-- reason：中文推荐理由，不超过 30 字，说明与哪个方向相关、亮点是什么。
-- title_zh：论文标题的中文翻译。
-- tldr：中文一句话概述，不超过 50 字。
-输出 JSON：{"results": [{"i": 0, "relevance": 8, "reason": "...", "title_zh": "...", "tldr": "..."}]}，必须覆盖所有候选论文。"""
-
-SUGGEST_SYSTEM = """你是帮助研究者配置论文订阅的助手，熟悉各领域论文常用的英文术语与 arXiv 分类。只输出 JSON。"""
+Output JSON with this structure:
+{{
+  "problem_solved": "the core problem the paper solves",
+  "explicit": [{{"claim": "the contribution", "quote": "the supporting sentence, verbatim in the paper's language", "section": "section"}}],
+  "derived": [{{"point": "a derived contribution", "basis": "basis (section, experiment, table, source)"}}],
+  "improvements": [{{"aspect": "what improves over prior work", "detail": "details", "evidence": "supporting evidence (numbers and baselines where possible)"}}],
+  "new_methods": [{{"name": "name of a method / model / dataset / metric / concept newly proposed in this paper", "description": "short description"}}],
+  "experimental_support": [{{"claim": "a conclusion supported by evidence", "evidence": "the evidence", "strength": "strong / moderate / weak"}}],
+  "inferred": [{{"point": "potential value", "rationale": "reasoning"}}]
+}}"""
 
 
-def suggest_task(name: str, description: str, categories: list[dict[str, str]]) -> str:
-    cats = "、".join(f"{c['id']}（{c['name']}）" for c in categories)
-    return f"""用户想订阅以下研究方向的最新论文：
-方向名称：{name}
-补充说明：{description or '无'}
+def abstract_translation_system(source: str | None, lang: str) -> str:
+    return f"""You are an expert academic translator. Translate the paper's title and abstract from {source_name(source)} into accurate, fluent {LANGUAGE[lang]}. {STYLE[lang]}
+Keep LaTeX formulas ($...$), citation markers and names of models and datasets unchanged. If the text quotes classical or historical language, keep the quotation character for character (no conversion between simplified, traditional or Japanese character forms) and add a modern {LANGUAGE[lang]} translation in parentheses.
+Output only JSON: {{"title": "...", "abstract": "..."}}"""
 
-请给出：
-1. keywords：8-12 个英文关键词或短语，要求是该方向论文标题/摘要中真实常用的术语，覆盖核心子方向；缩写（如 RAG、VLM）单独列出。
-2. exclude：可选的排除词（容易混淆的其他领域词汇），没有就给空数组。
-3. categories：从以下 arXiv 分类中选择 1-4 个最相关的分类 id：{cats}
-输出 JSON：{{"keywords": ["..."], "exclude": [], "categories": ["cs.CV"]}}"""
+
+def translation_system(keep_terms: bool, source: str | None, lang: str) -> str:
+    src = source_name(source)
+    if keep_terms:
+        term_rule = (f"When an important term first appears, write the {LANGUAGE[lang]} term followed by the original term "
+                     f"in parentheses, e.g. {TERM_EXAMPLE[lang]}; afterwards use the {LANGUAGE[lang]} term alone.")
+    else:
+        term_rule = f"Use the {LANGUAGE[lang]} terms directly, without repeating the original terms."
+    return f"""You are an expert translator of academic papers. Translate from {src} into accurate, fluent {LANGUAGE[lang]} that follows the academic writing conventions of that language. {STYLE[lang]}
+
+Rules:
+1. Faithfulness: translate every sentence completely. Do not add, omit, summarise or explain anything.
+2. Formula placeholders: markers such as ⟦M1⟧ and ⟦M2⟧ stand for mathematical formulas. Keep every placeholder unchanged at the semantically corresponding position in the translation; never modify, translate, merge or drop one.
+3. Keep citation markers unchanged, e.g. [12], [3, 5], (Smith et al., 2023).
+4. Terminology: follow the given glossary strictly and consistently. {term_rule}
+5. Proper nouns: model names, dataset names, method abbreviations, code identifiers and URLs stay exactly as in the original (e.g. CLIP, ImageNet, ResNet-50).
+6. Quotations of classical or historical texts (Classical Chinese, kanbun, Latin, Old English …): keep the original quotation verbatim, character for character (never convert between simplified, traditional and Japanese character forms), and add a modern {LANGUAGE[lang]} translation in parentheses right after it.
+7. Items with kind "title" are section headings: translate them as concise headings without numbering. Items with kind "caption" are figure or table captions.
+8. Output format: only the JSON object {{"translations": [{{"id": "<original id>", "text": "<translation>"}}]}}. Every input id must have exactly one translation, in the same order as the input."""
+
+
+def glossary_system(lang: str) -> str:
+    return f"You are a terminology expert who knows the standard {LANGUAGE[lang]} renderings of academic terms in every field. Output JSON only."
+
+
+def glossary_task(source: str | None, lang: str) -> str:
+    return f"""From the title, abstract and section headings of the paper below (written in {source_name(source)}), extract the 15-40 technical terms most important for understanding and translating it (core concepts, method names, task names, key technical vocabulary, important historical or cultural terms) and give their standard {LANGUAGE[lang]} renderings.
+- Proper nouns usually kept in the original form (model names, dataset names, abbreviations such as Transformer, CLIP, ViT): set "tgt" to the original and "keep" to true.
+- For all other terms "keep" is false.
+- "tgt" must be one complete, standard {LANGUAGE[lang]} term or the original term - never a mix of both or a half-transliteration. Terms named after people: use the conventional {LANGUAGE[lang]} form of the name if one exists, otherwise keep the original name.
+Output JSON: {{"terms": [{{"src": "term in the paper", "tgt": "{LANGUAGE[lang]} rendering", "keep": false}}]}}"""
+
+
+def rerank_system(lang: str) -> str:
+    return ("You screen research papers for a researcher. Given their research directions, judge how relevant and "
+            "worth reading each candidate is. Be objective: a paper whose keywords overlap only by chance while its "
+            "topic or discipline differs gets a low score. Output JSON only.")
+
+
+def rerank_task(lang: str) -> str:
+    return f"""For every candidate paper output:
+- relevance: integer 0-10. 10 = fits one of the directions very well and is clearly worth reading; 5 = partly relevant; 0 = unrelated.
+- reason: in {LANGUAGE[lang]}, at most ~20 words: which direction it fits and what stands out.
+- title_tr: the title translated into {LANGUAGE[lang]} (repeat it if it is already in {LANGUAGE[lang]}).
+- tldr: one sentence in {LANGUAGE[lang]} (at most ~30 words).
+Output JSON: {{"results": [{{"i": 0, "relevance": 8, "reason": "...", "title_tr": "...", "tldr": "..."}}]}} covering every candidate."""
+
+
+def suggest_system() -> str:
+    return ("You help researchers in any discipline set up a paper feed. You know the terms that papers of every field "
+            "actually use in titles and abstracts, how fast each field publishes, and the arXiv categories. Output JSON only.")
+
+
+def suggest_task(name: str, description: str, categories: list[dict[str, str]], fields: list[dict[str, str]],
+                 lang: str) -> str:
+    cats = ", ".join(c["id"] for c in categories)
+    fds = ", ".join(f"{f['id']} ({f['name']})" for f in fields)
+    return f"""The user wants new papers on this research direction:
+Name: {name}
+Notes: {description or 'none'}
+The user's interface language is {LANGUAGE[lang]}.
+
+Give:
+1. keywords: 8-12 keywords or short phrases that papers in this field really use in titles and abstracts, covering the main sub-topics. Most paper databases index English titles and abstracts, so give mostly English terms; list acronyms (e.g. RAG, VLM) separately. If the field also publishes substantially in Chinese, Japanese or Korean (for example East Asian history, literature, law or regional studies), add 2-5 keywords in those languages as well.
+2. exclude: optional words that pull in papers from other fields (empty array if none).
+3. categories: 0-4 arXiv category ids from this list that fit (empty if the field does not use arXiv, as in most humanities, social sciences, medicine and chemistry): {cats}
+4. fields: 1-3 OpenAlex field ids that the papers belong to, from: {fds}
+5. window_days: a sensible time window for "new papers" given how fast the field publishes: 7 for very active fields such as machine learning, 30 for most sciences and engineering, 60-90 for social sciences, 180 for humanities or very small fields.
+Output JSON: {{"keywords": ["..."], "exclude": [], "categories": [], "fields": ["17"], "window_days": 30}}"""

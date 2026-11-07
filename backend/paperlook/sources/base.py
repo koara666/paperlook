@@ -14,18 +14,26 @@ from typing import Any
 
 import httpx
 
-from .. import config
+from .. import config, i18n
 
 log = logging.getLogger(__name__)
 
 
 class SourceError(Exception):
-    """A user-presentable failure of one source (the run continues with the other sources)."""
+    """A user-presentable failure of one source (the run continues with the other sources).
 
-    def __init__(self, message: str, *, retryable: bool = True):
-        super().__init__(message)
+    `message` is a stored message (i18n.msg) or plain text; `code` is one of
+    timeout | network | rate_limit | server | refused | bad_data | config."""
+
+    def __init__(self, message: str | dict[str, Any], *, retryable: bool = True, code: str = "error"):
+        super().__init__(str(message))
         self.message = message
         self.retryable = retryable
+        self.code = code
+
+    @property
+    def text(self) -> str:
+        return i18n.render(self.message)
 
 
 @dataclass
@@ -36,6 +44,8 @@ class SourceQuery:
     date_from: date
     date_to: date
     max_results: int = 150
+    # ISO 639-1 codes of the paper languages wanted (empty = any language).
+    languages: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -62,6 +72,8 @@ class RawPaper:
     categories: list[str] = field(default_factory=list)
     comment: str | None = None
     journal_ref: str | None = None
+    # ISO 639-1 language of title/abstract as reported by the source (detect_language refines it).
+    language: str | None = None
     signals: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,11 +102,11 @@ class Source:
         return {
             "id": self.id,
             "name": self.name,
-            "description": self.description,
+            "description": i18n.t(self.description) if self.description else "",
             "homepage": self.homepage,
             "key_policy": self.key_policy,
-            "key_help": self.key_help,
-            "coverage": self.coverage,
+            "key_help": i18n.t(self.key_help) if self.key_help else "",
+            "coverage": i18n.t(self.coverage) if self.coverage else "",
             "default_enabled": self.default_enabled,
         }
 
@@ -155,21 +167,22 @@ def get_with_retry(url: str, *, params: Any = None, headers: dict | None = None,
                 kwargs["timeout"] = timeout
             resp = http().get(url, **kwargs)
         except httpx.TimeoutException as e:
-            last_exc = SourceError(f"{source_name} 响应超时")
+            last_exc = SourceError(i18n.msg("src.timeout", source=source_name), code="timeout")
             log.info("%s timeout (attempt %d): %s", source_name, attempt + 1, e)
         except httpx.HTTPError as e:
-            last_exc = SourceError(f"无法连接 {source_name}：{type(e).__name__}")
+            last_exc = SourceError(i18n.msg("src.network", source=source_name, error=type(e).__name__), code="network")
             log.info("%s network error (attempt %d): %s", source_name, attempt + 1, e)
         else:
             if resp.status_code == 429:
-                last_exc = SourceError(f"{source_name} 限制了访问频率（HTTP 429）")
+                last_exc = SourceError(i18n.msg("src.rate_limit", source=source_name), code="rate_limit")
                 ra = _retry_after(resp)
                 wait = min(ra, 60.0) if ra is not None else backoff_429 * (attempt + 1)
                 log.info("%s 429 (attempt %d), waiting %.0fs", source_name, attempt + 1, wait)
             elif resp.status_code >= 500:
-                last_exc = SourceError(f"{source_name} 服务暂时不可用（HTTP {resp.status_code}）")
+                last_exc = SourceError(i18n.msg("src.server", source=source_name, status=resp.status_code), code="server")
             elif resp.status_code >= 400:
-                raise SourceError(f"{source_name} 拒绝了请求（HTTP {resp.status_code}）", retryable=False)
+                raise SourceError(i18n.msg("src.refused", source=source_name, status=resp.status_code),
+                                  retryable=False, code="refused")
             else:
                 return resp
         if attempt < attempts - 1:

@@ -122,11 +122,11 @@ def test_feature_fallbacks(gemini, mock_url):
 
     c = ai_client.GeminiClient("AIza-mock-strict-1", "gemini-3.8-flash", base_url=mock_url, free_tier=False)
     try:
-        data, res = c.chat_json([{"role": "system", "content": "返回 JSON，字段 abstract_zh"},
+        data, res = c.chat_json([{"role": "system", "content": 'Output only JSON: {"title": "...", "abstract": "..."}'},
                                  {"role": "user", "content": "标题：X\n\n摘要：Y"}], kind="t")
     finally:
         c.close()
-    assert data["abstract_zh"]
+    assert data["abstract"]
     assert res.usage["completion_tokens"] > 7  # thought tokens are counted as output
     last = mock_deepseek.gemini_requests[-1]["body"]
     assert "systemInstruction" not in last
@@ -137,6 +137,7 @@ def test_feature_fallbacks(gemini, mock_url):
 
 def test_translation_uses_larger_chunks(gemini, mock_url):
     from paperlook.ai import client as ai_client
+    from paperlook.ai import prompts
     from paperlook.ai.translate import Unit, chunk_units, translate_chunk
 
     units = [Unit(f"p{i}", "s1", "paragraph", f"Paragraph {i} with math $x_{i}$. " + "word " * 300) for i in range(12)]
@@ -145,8 +146,8 @@ def test_translation_uses_larger_chunks(gemini, mock_url):
     assert len(chunk_units(units, free.chunk_chars, free.chunk_units)) < len(chunk_units(units))
     free.free_tier = False
     try:
-        out = translate_chunk(free, {"id": "p1", "title": "T"}, units[:3], "", "1 Intro", "（无）",
-                              "你是学术论文翻译专家")
+        out = translate_chunk(free, {"id": "p1", "title": "T"}, units[:3], "", "1 Intro", "(none)",
+                              prompts.translation_system(True, "en", "zh"))
     finally:
         free.close()
     assert set(out) == {"p0", "p1", "p2"}

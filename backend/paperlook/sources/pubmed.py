@@ -5,7 +5,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import date
 
-from .. import secrets_store
+from .. import i18n, secrets_store
 from ..textutil import collapse_ws
 from .base import RateLimiter, RawPaper, Source, SourceError, SourceQuery, clean_doi, code_signals, get_with_retry
 
@@ -68,10 +68,10 @@ def parse_efetch(xml_text: str) -> list[RawPaper]:
                 authors.append(name)
         # Electronic publication date is the first public appearance; fall back to issue date.
         pub, exact = _date_from(a.find("ArticleDate"))
-        note = "PubMed 电子出版日期"
+        note = "date.pubmed_epub"
         if pub is None:
             pub, exact = _date_from(a.find(".//Journal/JournalIssue/PubDate"))
-            note = "PubMed 期刊卷期日期"
+            note = "date.pubmed_issue"
         doi = None
         for el in a.findall("ELocationID"):
             if el.get("EIdType") == "doi":
@@ -81,7 +81,7 @@ def parse_efetch(xml_text: str) -> list[RawPaper]:
         out.append(RawPaper(
             source="pubmed", source_id=pmid, title=title, abstract=abstract, authors=authors[:60],
             published=pub, date_quality="exact" if exact else ("approx" if pub else "unknown"),
-            date_note=note if exact else (note + "（仅精确到月/年）"),
+            date_note=note if exact else note + "_month",
             venue=journal, doi=doi, pmid=pmid, url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/", signals=sig,
         ))
     return out
@@ -90,13 +90,13 @@ def parse_efetch(xml_text: str) -> list[RawPaper]:
 class PubMedSource(Source):
     id = "pubmed"
     name = "PubMed"
-    description = "美国国家医学图书馆的生物医学文献数据库，适合医学影像、生物信息等交叉方向。"
+    description = "source.pubmed.desc"
     homepage = "https://pubmed.ncbi.nlm.nih.gov"
     key_policy = "optional"
     key_secret = secrets_store.PUBMED
-    key_help = "无需 Key 即可使用；NCBI API Key 可提高请求频率上限。"
+    key_help = "source.pubmed.key_help"
     default_enabled = False
-    coverage = "生物医学与生命科学期刊"
+    coverage = "source.pubmed.coverage"
 
     def search(self, q: SourceQuery) -> list[RawPaper]:
         if not q.keywords:
@@ -120,4 +120,4 @@ class PubMedSource(Source):
         try:
             return parse_efetch(resp.text)
         except ET.ParseError as e:
-            raise SourceError(f"PubMed 返回了无法解析的数据：{e}")
+            raise SourceError(i18n.msg("src.bad_data", source="PubMed", error=str(e)), code="bad_data")

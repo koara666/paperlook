@@ -7,11 +7,12 @@ from fastapi import APIRouter
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from .. import cite, db, export, papers as papers_repo, settings_store
-from ..ai import analyze, translate
+from .. import cite, db, export, i18n, papers as papers_repo, settings_store
+from ..ai import analyze, prompts, translate
 from ..ai.client import is_configured, not_configured_error
 from ..errors import AppError
 from ..fulltext import fetcher
+from ..i18n import t
 from ..jobs import manager
 
 router = APIRouter(tags=["papers"])
@@ -22,15 +23,22 @@ AI_KINDS = ("summary", "modules", "contributions", "abstract_translation")
 def _require(paper_id: str) -> dict[str, Any]:
     p = papers_repo.get_paper(paper_id)
     if not p:
-        raise AppError("论文不存在", status_code=404)
+        raise AppError(t("err.paper_not_found"), status_code=404)
     return p
+
+
+def render_paper(p: dict[str, Any]) -> dict[str, Any]:
+    """A paper record for the API: interface texts (the date note) in the current language."""
+    note = p.get("date_note")
+    return {**p, "date_note": i18n.render_key(note) if note else note}
 
 
 def _latest_rec(paper_id: str) -> dict[str, Any] | None:
     r = db.query_one("SELECT * FROM recommendations WHERE paper_id = ? ORDER BY id DESC LIMIT 1", (paper_id,))
     if not r:
         return None
-    return {"score": r["score"], "breakdown": db.loads(r["breakdown"], {}), "reasons": db.loads(r["reasons"], []),
+    return {"score": r["score"], "breakdown": i18n.render(db.loads(r["breakdown"], {})),
+            "reasons": i18n.render(db.loads(r["reasons"], [])),
             "direction_name": r["direction_name"], "ai": db.loads(r["ai"], None), "recommended_at": r["created_at"],
             "batch_id": r["batch_id"]}
 
@@ -64,25 +72,40 @@ def _feature_status(paper_id: str, kind: str, job_kind: str, has_result: bool, r
     return {"status": status, "job": _job_brief(job)}
 
 
+def language_info(paper: dict[str, Any], doc: dict[str, Any] | None) -> dict[str, Any]:
+    """Which language the paper is in, which language AI output uses, and whether translating makes sense."""
+    target = prompts.output_language()
+    paper_lang = paper.get("language")
+    text_lang = translate.doc_language(doc, paper) if doc else None
+    abstract_lang = paper_lang
+    return {"target": target, "paper": paper_lang, "fulltext": text_lang,
+            "translate_needed": (text_lang or paper_lang or "en") != target,
+            "abstract_translate_needed": bool(paper.get("abstract")) and (abstract_lang or "en") != target}
+
+
 def ai_state(paper: dict[str, Any], doc: dict[str, Any] | None) -> dict[str, Any]:
     settings = settings_store.get_settings()
     features = settings["ai"]["features"]
+    lang = prompts.output_language()
     out: dict[str, Any] = {}
     for kind in AI_KINDS:
-        res = analyze.get_result(paper["id"], kind)
+        res = analyze.get_result(paper["id"], kind, lang)
         enabled = features.get(kind, True) if kind != "abstract_translation" else True
         st = _feature_status(paper["id"], kind, f"ai:{kind}", bool(res), res["created_at"] if res else None, enabled)
+        if res:
+            res = {**res, "basis": i18n.render(res.get("basis"))}
         st["result"] = res
         st["enabled"] = enabled
         # an abstract-based analysis can be upgraded once full text is available
         st["upgradable"] = bool(res and (res.get("basis") or {}).get("type") == "abstract" and doc)
         out[kind] = st
-    tstat = translate.status(paper["id"], doc)
+    tstat = translate.status(paper["id"], doc, lang)
     st = _feature_status(paper["id"], "translate", "translate", tstat["done"] > 0 and tstat["done"] >= tstat["total"] > 0,
                          None, features.get("translate", True))
     if st["status"] == "idle" and tstat["done"] > 0:
         st["status"] = "partial"
-    st.update(progress=tstat, enabled=features.get("translate", True))
+    st.update(progress=tstat, enabled=features.get("translate", True),
+              other_languages=[x for x in translate.translated_languages(paper["id"]) if x != lang])
     out["translate"] = st
     return out
 
@@ -143,10 +166,11 @@ def library_bibtex(filter: str = "all", q: str = ""):
     rows = db.query(f"SELECT p.*, {_LAST_REC} FROM papers p LEFT JOIN paper_state s ON s.paper_id = p.id "
                     f"WHERE {w} {_LIBRARY_ORDER} LIMIT 2000", params)
     if not rows:
-        raise AppError("当前列表没有论文，无法导出。", status_code=404)
+        raise AppError(t("err.library_empty"), status_code=404)
     text = cite.bibtex_many([papers_repo._decode(r) for r in rows])
+    name = t("export.bib_filename") + ".bib"
     return Response(text, media_type="application/x-bibtex; charset=utf-8",
-                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote('PaperLook 文献.bib')}"})
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
 @router.get("/papers/{paper_id}/cite")
@@ -161,12 +185,14 @@ def detail(paper_id: str):
     doc = fetcher.get_cached(paper_id)
     ft = None
     if doc:
-        ft = {"available": True, "source": doc["source"], "source_label": doc.get("source_label"),
+        shown = fetcher.render_doc(doc)
+        ft = {"available": True, "source": doc["source"], "source_label": shown.get("source_label"),
               "source_url": doc.get("source_url"), "fetched_at": doc.get("fetched_at"), "stats": doc.get("stats"),
-              "warnings": doc.get("warnings", [])}
+              "warnings": shown.get("warnings", [])}
     ft_job = manager.latest("fulltext", paper_id)
     return {
-        "paper": p,
+        "paper": render_paper(p),
+        "language": language_info(p, doc),
         "state": papers_repo.get_state(paper_id),
         "recommendation": _latest_rec(paper_id),
         "fulltext": ft,
@@ -199,13 +225,14 @@ def get_fulltext(paper_id: str):
     if not doc:
         active = manager.find_active("fulltext", paper_id)
         return {"available": False, "job": _job_brief(active.to_dict() if active else manager.latest("fulltext", paper_id))}
-    tmap = translate.translated_map(paper_id)
+    lang = prompts.output_language()
     return {
         "available": True,
-        "doc": doc,
-        "translations": tmap,
-        "translation_status": translate.status(paper_id, doc),
-        "glossary": translate.get_glossary(paper_id),
+        "doc": fetcher.render_doc(doc),
+        "translations": translate.translated_map(paper_id, lang),
+        "translation_status": translate.status(paper_id, doc, lang),
+        "glossary": translate.get_glossary(paper_id, lang),
+        "language": language_info(p, doc),
         "paper_title": p["title"],
     }
 
@@ -239,10 +266,10 @@ class AIRunIn(BaseModel):
 def run_ai(paper_id: str, kind: str, body: AIRunIn):
     _require(paper_id)
     if kind not in AI_KINDS:
-        raise AppError("未知的 AI 功能", status_code=404)
+        raise AppError(t("err.unknown_ai_kind"), status_code=404)
     if not is_configured():
         raise not_configured_error()
-    if not body.force and analyze.get_result(paper_id, kind):
+    if not body.force and analyze.get_result(paper_id, kind, exact=True):
         return {"status": "cached"}
     return manager.submit(f"ai:{kind}", lambda j: analyze.run(j, paper_id, kind), paper_id=paper_id).to_dict()
 
@@ -254,9 +281,13 @@ class TranslateIn(BaseModel):
 
 @router.post("/papers/{paper_id}/translate")
 def run_translate(paper_id: str, body: TranslateIn):
-    _require(paper_id)
+    p = _require(paper_id)
     if not is_configured():
         raise not_configured_error()
+    doc = fetcher.get_cached(paper_id)
+    info = language_info(p, doc)
+    if doc and not info["translate_needed"]:
+        raise AppError(t("err.translate_same_language", language=t(f"lang.{info['target']}")), code="same_language")
     active = manager.find_active("translate", paper_id)
     if active:
         return active.to_dict()
@@ -277,13 +308,14 @@ def export_paper(paper_id: str, type: str = "translation", mode: str = "bilingua
     p = _require(paper_id)
     if type == "analysis":
         text = export.analysis_markdown(p)
-        name = "AI分析"
+        name = t("export.name.analysis")
     else:
         doc = fetcher.get_cached(paper_id)
         if not doc:
-            raise AppError("尚未获取全文，无法导出译文。", status_code=404)
-        text = export.translation_markdown(p, doc, "zh" if mode == "zh" else "bilingual")
-        name = "译文" if mode == "zh" else "双语对照"
+            raise AppError(t("err.export_no_fulltext"), status_code=404)
+        mode = "translation" if mode in ("zh", "translation") else "bilingual"
+        text = export.translation_markdown(p, doc, mode)
+        name = t("export.name.translation" if mode == "translation" else "export.name.bilingual")
     safe = "".join(c for c in p["title"][:60] if c.isalnum() or c in " -_").strip() or "paper"
     filename = f"{safe} - {name}.md"
     return Response(text, media_type="text/markdown; charset=utf-8",

@@ -1,4 +1,4 @@
-const WEEK = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
+import { getLang, joinList, locale, t } from "../i18n";
 
 function parseDay(s: string): Date {
   const [y, m, d] = s.slice(0, 10).split("-").map(Number);
@@ -8,6 +8,10 @@ function parseDay(s: string): Date {
 function startOfToday() {
   const n = new Date();
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
+}
+
+function fmt(d: Date, opts: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat(locale(), opts).format(d);
 }
 
 /** ISO timestamp (UTC) -> local calendar day "YYYY-MM-DD". */
@@ -24,48 +28,46 @@ export function daysAgo(day: string | null | undefined): number | null {
 
 export function relativeDay(day: string | null | undefined): string {
   const n = daysAgo(day);
-  if (n === null) return "日期未知";
-  if (n === 0) return "今天";
-  if (n === 1) return "昨天";
-  if (n < 7) return `${n} 天前`;
+  if (n === null) return t("date.unknown");
+  if (n === 0) return t("date.today");
+  if (n === 1) return t("date.yesterday");
+  if (n < 7) return t("date.days_ago", { n });
   return shortDate(day!);
 }
 
 export function shortDate(day: string): string {
   const d = parseDay(day);
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return sameYear ? `${d.getMonth() + 1}月${d.getDate()}日` : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  return fmt(d, sameYear ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
 }
 
 export function longDate(day: string): string {
-  const d = parseDay(day);
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日`;
+  return fmt(parseDay(day), { year: "numeric", month: "long", day: "numeric" });
 }
 
 export function todayHeading(): { date: string; weekday: string } {
   const d = new Date();
-  return { date: `${d.getMonth() + 1}月${d.getDate()}日`, weekday: WEEK[d.getDay()] };
+  return { date: fmt(d, { month: "long", day: "numeric" }), weekday: fmt(d, { weekday: "long" }) };
 }
 
 export function dayLabel(day: string): string {
   const n = daysAgo(day);
   const d = parseDay(day);
-  const base = `${d.getMonth() + 1}月${d.getDate()}日 ${WEEK[d.getDay()]}`;
-  if (n === 0) return `今天 · ${base}`;
-  if (n === 1) return `昨天 · ${base}`;
-  return d.getFullYear() === new Date().getFullYear() ? base : `${d.getFullYear()}年${base}`;
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const base = fmt(d, sameYear ? { month: "long", day: "numeric", weekday: "long" } : { year: "numeric", month: "long", day: "numeric", weekday: "long" });
+  if (n === 0) return `${t("date.today")} · ${base}`;
+  if (n === 1) return `${t("date.yesterday")} · ${base}`;
+  return base;
 }
 
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return "";
-  const t = new Date(iso).getTime();
-  const s = Math.max(0, (Date.now() - t) / 1000);
-  if (s < 60) return "刚刚";
-  if (s < 3600) return `${Math.floor(s / 60)} 分钟前`;
-  if (s < 86400) return `${Math.floor(s / 3600)} 小时前`;
-  if (s < 86400 * 7) return `${Math.floor(s / 86400)} 天前`;
-  const d = new Date(iso);
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return t("date.just_now");
+  if (s < 3600) return t("date.minutes_ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("date.hours_ago", { n: Math.floor(s / 3600) });
+  if (s < 86400 * 7) return t("date.days_ago", { n: Math.floor(s / 86400) });
+  return fmt(new Date(iso), { month: "short", day: "numeric" });
 }
 
 export function clockTime(iso: string): string {
@@ -76,8 +78,12 @@ export function clockTime(iso: string): string {
 export function tokens(n: number | undefined | null): string {
   const v = n ?? 0;
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(2)}M`;
-  if (v >= 10_000) return `${(v / 10_000).toFixed(1)} 万`;
-  return v.toLocaleString("zh-CN");
+  const lang = getLang();
+  if (v >= 10_000 && lang === "zh") return `${(v / 10_000).toFixed(1)} 万`;
+  if (v >= 10_000 && lang === "ja") return `${(v / 10_000).toFixed(1)}万`;
+  if (v >= 10_000 && lang === "ko") return `${(v / 10_000).toFixed(1)}만`;
+  if (v >= 10_000) return `${(v / 1000).toFixed(1)}k`;
+  return v.toLocaleString(locale());
 }
 
 export function bytes(n: number): string {
@@ -88,19 +94,34 @@ export function bytes(n: number): string {
 }
 
 export function authorsShort(authors: string[], total?: number, max = 3): string {
-  if (!authors.length) return "作者未知";
+  if (!authors.length) return t("paper.authors_unknown");
   const n = total ?? authors.length;
   if (n <= max) return authors.join(", ");
-  return `${authors.slice(0, max).join(", ")} 等 ${n} 人`;
+  return t("paper.authors_etal", { names: authors.slice(0, max).join(", "), n });
 }
 
 export function pct(v: number) {
   return `${Math.round(v * 100)}`;
 }
 
+export function list(items: string[]): string {
+  return joinList(items);
+}
+
 export const SOURCE_LABEL: Record<string, string> = {
   arxiv: "arXiv",
   openalex: "OpenAlex",
+  cinii: "CiNii",
   semantic_scholar: "Semantic Scholar",
   pubmed: "PubMed",
 };
+
+/** Name of a paper language (ISO 639-1) in the interface language. */
+export function languageName(code: string | null | undefined): string {
+  if (!code) return "";
+  try {
+    return new Intl.DisplayNames([locale()], { type: "language" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}

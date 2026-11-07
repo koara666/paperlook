@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { t as tr } from "../../i18n";
 import { createPortal } from "react-dom";
 import { cn } from "../../lib/cn";
 import { Button } from "./primitives";
@@ -59,7 +60,7 @@ export function Dialog({
             <h2 className="text-base font-semibold text-text">{title}</h2>
             {description && <p className="mt-0.5 text-[13px] text-text-2">{description}</p>}
           </div>
-          <button onClick={onClose} aria-label="关闭" className="-mr-1 rounded-lg p-1 text-text-3 hover:bg-surface-3 hover:text-text">
+          <button onClick={onClose} aria-label={tr("common.close")} className="-mr-1 rounded-lg p-1 text-text-3 hover:bg-surface-3 hover:text-text">
             <X className="size-4" />
           </button>
         </div>
@@ -93,10 +94,10 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
         footer={
           <>
             <Button variant="ghost" onClick={() => close(false)}>
-              取消
+              {tr("common.cancel")}
             </Button>
             <Button variant={state?.danger ? "danger" : "primary"} onClick={() => close(true)} autoFocus>
-              {state?.confirmText ?? "确定"}
+              {state?.confirmText ?? tr("common.ok")}
             </Button>
           </>
         }
@@ -138,7 +139,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
                 <div className="text-sm font-medium text-text">{t.title}</div>
                 {t.description && <div className="mt-0.5 text-[13px] leading-relaxed text-text-2">{t.description}</div>}
               </div>
-              <button className="text-text-3 hover:text-text" onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))} aria-label="关闭">
+              <button className="text-text-3 hover:text-text" onClick={() => setToasts((ts) => ts.filter((x) => x.id !== t.id))} aria-label={tr("common.close")}>
                 <X className="size-3.5" />
               </button>
             </div>

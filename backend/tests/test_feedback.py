@@ -1,6 +1,7 @@
 """Preference from the user's own feedback: explainable, ordering-only, off without enough feedback."""
 from datetime import date
 
+from paperlook import i18n
 from paperlook.recommend import feedback, ranker
 from paperlook.recommend.relevance import compile_direction
 
@@ -38,8 +39,11 @@ def test_similar_to_favourites_goes_up_and_similar_to_dismissed_goes_down():
     assert prefs[2].adjust < -0.05 and prefs[2].kind == "dismissed"
     assert abs(prefs[1].adjust) < abs(prefs[0].adjust) and abs(prefs[3].adjust) < abs(prefs[2].adjust)
     assert all(abs(p.adjust) <= feedback.MAX_ADJUST for p in prefs.values())
-    assert feedback.reason(prefs[0]).startswith("与你") and "相近" in feedback.reason(prefs[0])
-    assert "不感兴趣" in feedback.reason(prefs[2]) and "降低排序" in feedback.reason(prefs[2])
+    reason = i18n.render(feedback.reason(prefs[0]), "zh")
+    assert reason.startswith("与你") and "相近" in reason
+    assert i18n.render(feedback.reason(prefs[0]), "en").startswith("Similar to")
+    dismissed = i18n.render(feedback.reason(prefs[2]), "zh")
+    assert "不感兴趣" in dismissed and "降低排序" in dismissed
 
 
 def test_off_without_enough_feedback():
@@ -74,7 +78,7 @@ def test_preference_reorders_but_never_changes_candidacy():
     gnn = next(s for s in scored if s.paper["title"].startswith("Graph"))
     b = ranker.breakdown(gnn, weights)
     assert b["preference"]["adjust"] > 0 and b["keyword_relevance"] == round(gnn.relevance.score, 4)
-    assert any("相近" in r for r in ranker.build_reasons(gnn, date(2026, 10, 21)))
+    assert any("相近" in r for r in i18n.render(ranker.build_reasons(gnn, date(2026, 10, 21)), "zh"))
 
 
 def test_feedback_is_read_from_the_library(tmp_db):

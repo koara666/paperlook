@@ -25,8 +25,10 @@ import { isActive, useAiLabel, useFulltext, useJob, useSettings, useTranslateReq
 import type { Block, FullDoc, FulltextResponse, Job, PaperDetail, Section } from "../../api/types";
 import { Dialog, MenuItem, Popover, Tooltip, useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Notice, ProgressBar, Segmented, Skeleton } from "../../components/ui/primitives";
+import { rich, t } from "../../i18n";
 import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
+import { languageName } from "../../lib/format";
 import { MathBlock, MathText, plainText } from "../../lib/math";
 import { estimateTokens, useAiRunner } from "./AiPanel";
 
@@ -48,7 +50,7 @@ const Para = memo(function Para({ orig, zh, view, as = "p", className }: { orig:
       return (
         <Tag className={cn("orig block text-text-3", className)}>
           <MathText text={orig} />
-          <span className="ml-2 inline-flex rounded bg-surface-3 px-1.5 align-middle font-sans text-[11px] text-text-3">未翻译</span>
+          <span className="ml-2 inline-flex rounded bg-surface-3 px-1.5 align-middle font-sans text-[11px] text-text-3">{t("ft.untranslated")}</span>
         </Tag>
       );
     return (
@@ -114,13 +116,13 @@ const BlockView = memo(function BlockView({ b, tr, view, onImage }: { b: Block; 
           {b.images.length > 0 ? (
             <div className={cn("grid gap-2", b.images.length > 1 && "sm:grid-cols-2")}>
               {b.images.map((src) => (
-                <button key={src} onClick={() => onImage(src)} className="overflow-hidden rounded-lg bg-white" title="点击放大">
+                <button key={src} onClick={() => onImage(src)} className="overflow-hidden rounded-lg bg-white" title={t("ft.zoom")}>
                   <img src={src} alt={b.label ?? "figure"} loading="lazy" className="mx-auto max-h-[460px] w-auto object-contain" />
                 </button>
               ))}
             </div>
           ) : (
-            <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center font-sans text-xs text-text-3">图片无法从全文中提取，请查看原文 PDF</div>
+            <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center font-sans text-xs text-text-3">{t("ft.no_image")}</div>
           )}
           <Caption label={b.label} id={b.id} caption={b.caption} tr={tr} view={view} />
         </figure>
@@ -212,8 +214,8 @@ function SectionView({
       if (b.type === "paragraph" || b.type === "heading") parts.push(tr[b.id]?.text ?? b.text);
       if (b.type === "list") b.items.forEach((it, i) => parts.push("• " + (tr[`${b.id}::${i}`]?.text ?? it)));
     }
-    if (await copyText(plainText(`${titleZh ?? s.title}\n\n${parts.join("\n\n")}`))) toast({ tone: "success", title: "已复制本节内容" });
-    else toast({ tone: "error", title: "复制失败", description: "无法访问剪贴板" });
+    if (await copyText(plainText(`${titleZh ?? s.title}\n\n${parts.join("\n\n")}`))) toast({ tone: "success", title: t("ft.copied_section") });
+    else toast({ tone: "error", title: t("common.copy_failed"), description: t("common.clipboard_denied") });
   };
   return (
     <section id={`sec-${s.id}`} data-sid={s.id} className="scroll-mt-36">
@@ -229,14 +231,14 @@ function SectionView({
         </H>
         <div className="flex shrink-0 items-center gap-0.5 pt-1 opacity-0 transition-opacity group-hover:opacity-100 max-sm:opacity-100">
           {total > 0 && done > 0 && done < total && <span className="mr-1 text-[11px] text-text-3">{done}/{total}</span>}
-          <Tooltip content="复制本节（优先复制译文）" align="end">
-            <button onClick={copy} className="rounded-md p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" aria-label="复制本节">
+          <Tooltip content={t("ft.copy_section_tip")} align="end">
+            <button onClick={copy} className="rounded-md p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" aria-label={t("ft.copy_section")}>
               <ClipboardCopy className="size-3.5" />
             </button>
           </Tooltip>
           {canTranslate && total > 0 && (
-            <Tooltip content={done ? "重新翻译本节" : "翻译本节"} align="end">
-              <button onClick={() => onRetranslate(s.id)} className="rounded-md p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" aria-label="翻译本节">
+            <Tooltip content={done ? t("ft.retranslate_section") : t("ft.translate_section")} align="end">
+              <button onClick={() => onRetranslate(s.id)} className="rounded-md p-1.5 text-text-3 hover:bg-surface-3 hover:text-text" aria-label={t("ft.translate_section")}>
                 <RotateCcw className="size-3.5" />
               </button>
             </Tooltip>
@@ -258,7 +260,7 @@ function References({ sections }: { sections: Section[] }) {
     <div className="mt-14 rounded-xl border border-border font-sans">
       <button onClick={() => setOpen(!open)} className="flex w-full items-center justify-between px-4 py-3 text-left">
         <span className="text-[15px] font-semibold text-text">
-          参考文献 <span className="font-normal text-text-3">（{refs.length}，保留原文不翻译）</span>
+          {t("ft.references")} <span className="font-normal text-text-3">{t("ft.references_note", { n: refs.length })}</span>
         </span>
         <ChevronDown className={cn("size-4 text-text-3 transition-transform", open && "rotate-180")} />
       </button>
@@ -327,6 +329,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
   const runAi = useAiRunner(detail.paper.id);
   const tState = detail.ai.translate;
   const translating = tState.status === "running";
+  const target = detail.language?.target;
   const ft = useFulltext(id, translating);
   const [fetchJobId, setFetchJobId] = useState<string | null>(null);
   const [image, setImage] = useState<string | null>(null);
@@ -338,7 +341,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
     setFetchJobId(null);
     qc.invalidateQueries({ queryKey: ["fulltext", id] });
     qc.invalidateQueries({ queryKey: ["paper", id] });
-    if (j.status === "failed") toast({ tone: "error", title: "无法获取全文", description: j.error ?? undefined });
+    if (j.status === "failed") toast({ tone: "error", title: t("ft.cannot_fetch"), description: j.error ?? undefined });
   });
 
   const startFetch = async (force: boolean) => {
@@ -347,7 +350,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
       if ("id" in r) setFetchJobId(r.id);
       else qc.invalidateQueries({ queryKey: ["fulltext", id] });
     } catch (e) {
-      toast({ tone: "error", title: "无法获取全文", description: errorMessage(e) });
+      toast({ tone: "error", title: t("ft.cannot_fetch"), description: errorMessage(e) });
     }
   };
 
@@ -398,7 +401,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
       await api.post(`/papers/${id}/translate`, { sections: sections ?? null, force });
       qc.invalidateQueries({ queryKey: ["paper", id] });
     } catch (e) {
-      toast({ tone: "error", title: "无法开始翻译", description: errorMessage(e) });
+      toast({ tone: "error", title: t("ft.cannot_translate"), description: errorMessage(e) });
     }
   };
 
@@ -417,8 +420,8 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
         <div className="flex items-center gap-3">
           <Loader2 className="size-5 animate-spin text-accent" />
           <div>
-            <div className="font-medium text-text">正在获取全文…</div>
-            <div className="text-[13px] text-text-2">{fetchJob.data?.message ?? "优先使用 arXiv 的结构化 HTML 版本，以保留章节、公式与图表"}</div>
+            <div className="font-medium text-text">{t("ft.fetching")}</div>
+            <div className="text-[13px] text-text-2">{fetchJob.data?.message ?? t("ft.fetching_hint")}</div>
           </div>
         </div>
         <div className="mt-6 space-y-3">
@@ -442,16 +445,16 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
               <FileWarning className="size-5" />
             </span>
             <div className="min-w-0 flex-1">
-              <h3 className="font-semibold text-text">无法获取这篇论文的全文</h3>
-              <p className="mt-1 text-sm leading-relaxed text-text-2">{err ?? "没有找到可合法访问的开放全文。"}</p>
+              <h3 className="font-semibold text-text">{t("ft.unavailable")}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-text-2">{err ?? t("ft.no_open_copy")}</p>
               <div className="mt-4 flex flex-wrap gap-2">
                 <Button size="sm" icon={<RefreshCw className="size-3.5" />} onClick={() => startFetch(true)}>
-                  重新尝试
+                  {t("ft.try_again")}
                 </Button>
                 {detail.paper.url && (
                   <a href={detail.paper.url} target="_blank" rel="noreferrer">
                     <Button size="sm" variant="ghost" icon={<ExternalLink className="size-3.5" />}>
-                      打开原文页面
+                      {t("ft.open_original")}
                     </Button>
                   </a>
                 )}
@@ -463,16 +466,16 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
           <Notice
             tone="accent"
             icon={<Languages className="size-4" />}
-            title="可以先翻译摘要"
+            title={t("ft.translate_abstract_first")}
             action={
               !absState.result && detail.ai_configured ? (
                 <Button size="sm" variant="primary" loading={absState.status === "running"} onClick={() => runAi("abstract_translation")}>
-                  翻译摘要
+                  {t("ov.translate_abstract")}
                 </Button>
               ) : undefined
             }
           >
-            注意：这只是<strong className="font-semibold text-text">摘要翻译</strong>，不是全文翻译。
+            {rich("ft.abstract_only_note", {}, { b: (x) => <strong className="font-semibold text-text">{x}</strong> })}
             {absState.result && <p className="zh mt-3 text-[15px] leading-relaxed text-text">{absState.result.content.abstract_zh}</p>}
           </Notice>
         )}
@@ -485,24 +488,34 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
   const total = status?.total ?? 0;
   const complete = total > 0 && done >= total;
   const job = tState.job;
+  // A paper written in the output language needs no translation (unless one exists from before).
+  const langInfo = ft.data?.language ?? detail.language;
+  const noTranslation = !!langInfo && !langInfo.translate_needed && done === 0 && !translating;
 
   return (
     <div>
       {/* toolbar */}
       <div className="sticky top-[104px] z-20 -mx-4 mb-4 border-b border-border bg-bg/90 px-4 py-2.5 backdrop-blur sm:-mx-6 sm:px-6 lg:top-[49px]">
         <div className="flex flex-wrap items-center gap-2">
+          {noTranslation ? (
+            <span className="flex items-center gap-1.5 text-[13px] text-text-2">
+              <Languages className="size-3.5 text-text-3" />
+              {t("ft.same_language", { language: languageName(langInfo!.fulltext ?? langInfo!.paper ?? "en") })}
+            </span>
+          ) : (
           <Segmented<View>
             size="sm"
             value={view}
             onChange={setView}
             options={[
-              { value: "en", label: "原文" },
-              { value: "bilingual", label: "对照" },
-              { value: "zh", label: "译文" },
+              { value: "en", label: t("ft.view.original") },
+              { value: "bilingual", label: t("ft.view.bilingual") },
+              { value: "zh", label: t("ft.view.translation") },
             ]}
           />
+          )}
           <div className="ml-auto flex flex-wrap items-center gap-2">
-            {translating ? (
+            {noTranslation ? null : translating ? (
               <div className="flex items-center gap-2.5">
                 <div className="hidden w-44 sm:block">
                   <ProgressBar value={done} max={total || 1} />
@@ -512,31 +525,31 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                   {done}/{total}
                 </span>
                 <Button size="sm" variant="ghost" icon={<Square className="size-3.5" />} onClick={() => api.post(`/papers/${id}/translate/cancel`)}>
-                  停止
+                  {t("common.stop")}
                 </Button>
               </div>
             ) : complete ? (
               <Badge tone="success" icon={<Check className="size-3" />}>
-                全文已翻译
+                {t("ft.all_translated")}
               </Badge>
             ) : !tState.enabled ? (
-              <span className="text-xs text-text-3">全文翻译已在设置中关闭</span>
+              <span className="text-xs text-text-3">{t("ft.translate_off")}</span>
             ) : !detail.ai_configured ? (
               <Link to="/settings?s=ai">
                 <Button size="sm" variant="soft" icon={<Languages className="size-3.5" />}>
-                  配置 AI 服务后可翻译
+                  {t("ft.configure_to_translate")}
                 </Button>
               </Link>
             ) : (
               <>
                 {done > 0 && (
                   <span className="text-xs tabular-nums text-text-3">
-                    已翻译 {done}/{total} 段
+                    {t("ft.translated_n", { done, total })}
                   </span>
                 )}
-                <Tooltip side="bottom" align="end" content={`调用 ${aiLabel} 翻译全文（预计约 ${estimateTokens(detail, (detail.fulltext?.stats?.words ?? 6000) / 500)} tokens${reqs ? `，约 ${reqs} 次请求` : ""}）。已翻译的部分会保存，中断后可继续。`}>
+                <Tooltip side="bottom" align="end" content={t(reqs ? "ft.translate_tip_reqs" : "ft.translate_tip", { provider: aiLabel, tokens: estimateTokens(detail, (detail.fulltext?.stats?.words ?? 6000) / 500), reqs, language: languageName(target) })}>
                   <Button size="sm" variant="primary" icon={<Play className="size-3.5" />} onClick={() => startTranslate()}>
-                    {done > 0 ? `继续翻译（剩余 ${total - done} 段）` : "全文翻译"}
+                    {done > 0 ? t("ft.continue", { n: total - done }) : t("ft.translate_into", { language: languageName(target) })}
                   </Button>
                 </Tooltip>
               </>
@@ -548,16 +561,16 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                 className="w-[320px] p-3"
                 trigger={({ toggle }) => (
                   <Button size="sm" variant="ghost" icon={<BookA className="size-3.5" />} onClick={toggle}>
-                    术语表
+                    {t("ft.glossary")}
                   </Button>
                 )}
               >
-                <div className="mb-2 text-xs text-text-3">翻译时统一使用以下译法</div>
+                <div className="mb-2 text-xs text-text-3">{t("ft.glossary_hint")}</div>
                 <div className="max-h-[320px] space-y-1 overflow-y-auto text-[13px]">
                   {ft.data!.glossary!.map((g) => (
-                    <div key={g.en} className="grid grid-cols-2 gap-2 rounded-md px-1.5 py-1 hover:bg-surface-3">
-                      <span className="font-serif text-text-2">{g.en}</span>
-                      <span className="text-text">{g.zh}</span>
+                    <div key={g.src} className="grid grid-cols-2 gap-2 rounded-md px-1.5 py-1 hover:bg-surface-3">
+                      <span className="font-serif text-text-2">{g.src}</span>
+                      <span className="text-text">{g.tgt}</span>
                     </div>
                   ))}
                 </div>
@@ -568,12 +581,12 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
               align="end"
               className="w-[230px]"
               trigger={({ toggle }) => (
-                <Button size="sm" variant="ghost" icon={<MoreHorizontal className="size-4" />} onClick={toggle} aria-label="更多" />
+                <Button size="sm" variant="ghost" icon={<MoreHorizontal className="size-4" />} onClick={toggle} aria-label={t("common.more")} />
               )}
             >
               {(close) => (
                 <>
-                  <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-text-3">字号</div>
+                  <div className="px-2.5 pb-1 pt-1.5 text-[11px] font-medium text-text-3">{t("ft.font_size")}</div>
                   <div className="flex gap-1 px-1.5 pb-1.5">
                     {(["sm", "md", "lg"] as const).map((s) => (
                       <button
@@ -587,10 +600,10 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                   </div>
                   <div className="my-1 border-t border-border" />
                   <a href={`/api/papers/${id}/export?type=translation&mode=bilingual`} onClick={close}>
-                    <MenuItem icon={<Download className="size-4" />}>导出双语 Markdown</MenuItem>
+                    <MenuItem icon={<Download className="size-4" />}>{t("ft.export_bilingual")}</MenuItem>
                   </a>
                   <a href={`/api/papers/${id}/export?type=translation&mode=zh`} onClick={close}>
-                    <MenuItem icon={<Download className="size-4" />}>导出译文 Markdown</MenuItem>
+                    <MenuItem icon={<Download className="size-4" />}>{t("ft.export_translation")}</MenuItem>
                   </a>
                   <div className="my-1 border-t border-border" />
                   {canTranslate && done > 0 && (
@@ -598,11 +611,11 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                       icon={<RotateCcw className="size-4" />}
                       onClick={async () => {
                         close();
-                        if (await confirm({ title: "重新翻译全文？", description: `将删除现有译文并重新调用 ${aiLabel} 翻译整篇论文。`, confirmText: "重新翻译", danger: true }))
+                        if (await confirm({ title: t("ft.retranslate_q"), description: t("ft.retranslate_desc", { provider: aiLabel }), confirmText: t("ft.retranslate"), danger: true }))
                           startTranslate(undefined, true);
                       }}
                     >
-                      重新翻译全文
+                      {t("ft.retranslate_all")}
                     </MenuItem>
                   )}
                   <MenuItem
@@ -610,11 +623,11 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                     disabled={translating}
                     onClick={async () => {
                       close();
-                      if (await confirm({ title: "重新获取全文？", description: "会重新下载并解析全文。已有译文将被清除（因为段落可能变化）。", confirmText: "重新获取", danger: done > 0 }))
+                      if (await confirm({ title: t("ft.refetch_q"), description: t("ft.refetch_desc"), confirmText: t("ft.refetch"), danger: done > 0 }))
                         startFetch(true);
                     }}
                   >
-                    重新获取全文
+                    {t("ft.refetch_all")}
                   </MenuItem>
                 </>
               )}
@@ -629,14 +642,14 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
       </div>
 
       {!translating && tState.status === "partial" && job?.message && !complete && (
-        <Notice tone="warning" icon={<AlertTriangle className="size-4" />} className="mb-4" title="翻译未全部完成">
+        <Notice tone="warning" icon={<AlertTriangle className="size-4" />} className="mb-4" title={t("ft.partial")}>
           {job.error ?? job.message}
         </Notice>
       )}
       {!translating && tState.status === "failed" && job?.error && (
-        <Notice tone="danger" icon={<AlertTriangle className="size-4" />} className="mb-4" title="翻译失败">
+        <Notice tone="danger" icon={<AlertTriangle className="size-4" />} className="mb-4" title={t("ft.failed")}>
           {job.error}
-          {done > 0 && " 已完成的部分已保存，点击「继续翻译」可接着翻译。"}
+          {done > 0 && " " + t("ft.partial_saved")}
         </Notice>
       )}
 
@@ -644,9 +657,9 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
         <aside className="hidden xl:block">
           <div className="sticky top-[118px] max-h-[calc(100vh-140px)] overflow-y-auto pb-6">
             <div className="mb-2 flex items-center gap-1.5 px-2 text-xs font-medium text-text-3">
-              <ListTree className="size-3.5" /> 目录
+              <ListTree className="size-3.5" /> {t("ft.toc")}
             </div>
-            <Toc doc={doc} tr={tr} view={view} status={status} active={active} />
+            <Toc doc={doc} tr={tr} view={noTranslation ? "en" : view} status={status} active={active} />
           </div>
         </aside>
 
@@ -654,10 +667,10 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
           <div className="mb-6 flex flex-wrap items-center gap-2 font-sans text-xs text-text-3">
             <Badge tone={doc.source === "arxiv_html" ? "success" : "warning"}>{doc.source_label}</Badge>
             <span>
-              {doc.stats.sections} 节 · 约 {Math.round(doc.stats.words / 100) / 10}k 词 · {doc.stats.figures} 图 · {doc.stats.tables} 表 · {doc.stats.equations} 个公式
+              {t("ft.stats", { sections: doc.stats.sections, words: Math.round(doc.stats.words / 100) / 10, figures: doc.stats.figures, tables: doc.stats.tables, equations: doc.stats.equations })}
             </span>
             <a href={doc.source_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 hover:text-accent-text">
-              来源 <ExternalLink className="size-3" />
+              {t("ft.source")} <ExternalLink className="size-3" />
             </a>
           </div>
           {doc.warnings.map((w) => (
@@ -672,14 +685,14 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
                 key={s.id}
                 s={s}
                 tr={tr}
-                view={view}
+                view={noTranslation ? "en" : view}
                 done={status?.sections[s.id]?.done ?? 0}
                 total={status?.sections[s.id]?.total ?? 0}
                 onImage={setImage}
                 canTranslate={canTranslate}
                 onRetranslate={async (sid) => {
                   const has = (status?.sections[sid]?.done ?? 0) > 0;
-                  if (!has || (await confirm({ title: "重新翻译本节？", description: "将覆盖本节现有译文。", confirmText: "重新翻译" })))
+                  if (!has || (await confirm({ title: t("ft.retranslate_section_q"), description: t("ft.retranslate_section_desc"), confirmText: t("ft.retranslate") })))
                     startTranslate([sid], has);
                 }}
               />
@@ -689,7 +702,7 @@ export function FulltextTab({ detail }: { detail: PaperDetail }) {
         </article>
       </div>
 
-      <Dialog open={!!image} onClose={() => setImage(null)} title="图片" width="max-w-5xl">
+      <Dialog open={!!image} onClose={() => setImage(null)} title={t("ft.image")} width="max-w-5xl">
         {image && <img src={image} alt="" className="mx-auto max-h-[78vh] w-auto rounded-lg bg-white" />}
       </Dialog>
     </div>

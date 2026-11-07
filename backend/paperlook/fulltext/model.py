@@ -34,9 +34,14 @@ class DocBuilder:
         }
         self._sec_n = 0
 
-    def section(self, title: str, level: int = 1, number: str | None = None, kind: str = "body") -> dict[str, Any]:
+    def section(self, title: str, level: int = 1, number: str | None = None, kind: str = "body",
+                title_key: str | None = None) -> dict[str, Any]:
+        """title_key: an interface text shown instead of a missing title ("Front matter", "Untitled section");
+        such titles are not part of the paper, so they are never translated."""
         self._sec_n += 1
         s = {"id": f"s{self._sec_n}", "level": level, "number": number, "title": title, "kind": kind, "blocks": []}
+        if title_key:
+            s["title_key"] = title_key
         self.doc["sections"].append(s)
         return s
 
@@ -46,7 +51,7 @@ class DocBuilder:
         section["blocks"].append(block)
         return block
 
-    def warn(self, msg: str) -> None:
+    def warn(self, msg: Any) -> None:
         if msg not in self.doc["warnings"]:
             self.doc["warnings"].append(msg)
 
@@ -126,7 +131,7 @@ def plain_text(doc: dict[str, Any], max_chars: int = 200_000, include_appendix: 
             out.append(piece)
             size += len(piece)
             if size > max_chars:
-                out.append("…（后文因长度限制省略）")
+                out.append("… (the rest is omitted because of its length)")
                 return "\n\n".join(out)
     return "\n\n".join(out)
 

@@ -104,8 +104,10 @@ def _write_fallback(data: dict[str, str]) -> None:
 def backend_name() -> str:
     kr = _keyring()
     if kr is not None:
-        return "系统凭据管理器"
-    return "本地加密文件 (Windows DPAPI)" if sys.platform == "win32" else "本地文件（仅限当前用户读取）"
+        from .i18n import t
+        return t("secret.keyring")
+    from .i18n import t
+    return t("secret.dpapi") if sys.platform == "win32" else t("secret.file")
 
 
 def get_secret(name: str) -> str | None:

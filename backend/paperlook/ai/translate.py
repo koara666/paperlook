@@ -11,6 +11,10 @@ Pipeline:
     previous paragraph passed as read-only context.
  5. Each unit is saved as soon as its chunk succeeds -> failures/cancellation lose nothing and
     "continue" only translates what is missing. Sections can be re-translated individually.
+
+The target is the AI output language (zh/en/ja/ko); the source language is detected from the document,
+so papers in any language can be translated. A paper already written in the target language is not.
+Translations and glossaries are stored per target language.
 """
 from __future__ import annotations
 
@@ -24,8 +28,10 @@ from typing import Any
 from .. import db, papers as papers_repo, settings_store
 from ..errors import AppError
 from ..fulltext import fetcher
-from ..fulltext.model import units as doc_units
+from ..fulltext.model import plain_text, units as doc_units
+from ..i18n import t
 from ..jobs import Job, JobCancelled
+from ..textutil import detect_language
 from . import prompts
 from .client import AIError, BaseClient, get_client
 
@@ -107,14 +113,31 @@ def chunk_units(units: list[Unit], max_chars: int = CHUNK_CHARS, max_units: int 
     return chunks
 
 
-def translated_map(paper_id: str) -> dict[str, dict[str, Any]]:
-    rows = db.query("SELECT unit_id, text, flags FROM translations WHERE paper_id = ?", (paper_id,))
+def doc_language(doc: dict[str, Any], paper: dict[str, Any] | None = None) -> str | None:
+    """Language the full text is written in (the metadata language can differ: CJK journals often
+    publish English titles and abstracts for papers written in Chinese, Japanese or Korean)."""
+    sample = plain_text(doc, max_chars=6000, include_appendix=False)
+    return detect_language(sample, (paper or {}).get("language")) or (paper or {}).get("language")
+
+
+def translated_map(paper_id: str, lang: str | None = None) -> dict[str, dict[str, Any]]:
+    lang = lang or prompts.output_language()
+    rows = db.query("SELECT unit_id, text, flags FROM translations WHERE paper_id = ? AND lang = ?", (paper_id, lang))
     return {r["unit_id"]: {"text": r["text"], "flags": db.loads(r["flags"], [])} for r in rows}
 
 
-def get_glossary(paper_id: str) -> list[dict[str, Any]]:
-    r = db.query_one("SELECT content FROM ai_results WHERE paper_id = ? AND kind = 'glossary'", (paper_id,))
-    return (db.loads(r["content"], {}) or {}).get("terms", []) if r else []
+def translated_languages(paper_id: str) -> list[str]:
+    return [r["lang"] for r in db.query("SELECT DISTINCT lang FROM translations WHERE paper_id = ?", (paper_id,))]
+
+
+def get_glossary(paper_id: str, lang: str | None = None) -> list[dict[str, Any]]:
+    lang = lang or prompts.output_language()
+    r = db.query_one("SELECT content FROM ai_results WHERE paper_id = ? AND kind = 'glossary' AND lang = ?",
+                     (paper_id, lang))
+    terms = (db.loads(r["content"], {}) or {}).get("terms", []) if r else []
+    # Glossaries before 1.3 used {"en", "zh"}.
+    return [{"src": x.get("src") or x.get("en") or "", "tgt": x.get("tgt") or x.get("zh") or "", "keep": bool(x.get("keep"))}
+            for x in terms if isinstance(x, dict)]
 
 
 def _section_path(doc: dict[str, Any]) -> dict[str, str]:
@@ -129,8 +152,9 @@ def _section_path(doc: dict[str, Any]) -> dict[str, str]:
     return path
 
 
-def ensure_glossary(client: BaseClient, paper: dict[str, Any], doc: dict[str, Any]) -> list[dict[str, Any]]:
-    existing = get_glossary(paper["id"])
+def ensure_glossary(client: BaseClient, paper: dict[str, Any], doc: dict[str, Any], source: str | None,
+                    lang: str) -> list[dict[str, Any]]:
+    existing = get_glossary(paper["id"], lang)
     if existing:
         return existing
     headings = [" ".join(x for x in [s.get("number"), s.get("title")] if x) for s in doc["sections"]
@@ -140,27 +164,24 @@ def ensure_glossary(client: BaseClient, paper: dict[str, Any], doc: dict[str, An
         if s["kind"] == "body":
             intro = " ".join(b.get("text", "") for b in s["blocks"] if b["type"] == "paragraph")[:3000]
             break
-    user = (f"{prompts.GLOSSARY_TASK}\n\n标题：{paper['title']}\n\n摘要：{paper.get('abstract') or ''}\n\n"
-            f"章节标题：\n" + "\n".join(headings[:60]) + f"\n\n引言节选：\n{intro}")
-    data, res = client.chat_json([{"role": "system", "content": prompts.GLOSSARY_SYSTEM}, {"role": "user", "content": user}],
+    user = (f"{prompts.glossary_task(source, lang)}\n\nTitle: {paper['title']}\n\nAbstract: {paper.get('abstract') or ''}\n\n"
+            f"Section headings:\n" + "\n".join(headings[:60]) + f"\n\nFrom the introduction:\n{intro}")
+    data, res = client.chat_json([{"role": "system", "content": prompts.glossary_system(lang)}, {"role": "user", "content": user}],
                                  thinking=False, max_tokens=4000, temperature=0.2, kind="glossary", paper_id=paper["id"])
     terms = []
-    for t in data.get("terms", []) if isinstance(data.get("terms"), list) else []:
-        if isinstance(t, dict) and t.get("en") and t.get("zh"):
-            terms.append({"en": str(t["en"])[:80], "zh": str(t["zh"])[:80], "keep": bool(t.get("keep"))})
-    db.execute(
-        "INSERT INTO ai_results(paper_id, kind, content, basis, model, usage, created_at) VALUES(?,?,?,?,?,?,?) "
-        "ON CONFLICT(paper_id, kind) DO UPDATE SET content=excluded.content, model=excluded.model, usage=excluded.usage, "
-        "created_at=excluded.created_at",
-        (paper["id"], "glossary", db.dumps({"terms": terms}), None, res.model, db.dumps(res.usage), db.now_iso()),
-    )
+    for x in data.get("terms", []) if isinstance(data.get("terms"), list) else []:
+        src, tgt = (x.get("src") or x.get("en"), x.get("tgt") or x.get("zh")) if isinstance(x, dict) else (None, None)
+        if src and tgt:
+            terms.append({"src": str(src)[:80], "tgt": str(tgt)[:80], "keep": bool(x.get("keep"))})
+    from .analyze import save_result
+    save_result(paper["id"], "glossary", lang, {"terms": terms}, None, res.model, res.usage)
     return terms
 
 
 def _glossary_text(terms: list[dict[str, Any]]) -> str:
     if not terms:
-        return "（无）"
-    return "\n".join(f"- {t['en']} → {t['zh']}" + ("（保留英文）" if t.get("keep") else "") for t in terms[:60])
+        return "(none)"
+    return "\n".join(f"- {x['src']} → {x['tgt']}" + (" (keep as is)" if x.get("keep") else "") for x in terms[:60])
 
 
 def translate_chunk(client: BaseClient, paper: dict[str, Any], chunk: list[Unit], context: str, section_path: str,
@@ -172,15 +193,16 @@ def translate_chunk(client: BaseClient, paper: dict[str, Any], chunk: list[Unit]
     for attempt in range(2):
         items = [{"id": u.id, "kind": u.kind, "text": masked[u.id][0]} for u in pending]
         # Constant per-paper prefix first (title + glossary) so the provider's prompt cache can hit.
-        user = (f"论文标题：{paper['title']}\n\n术语表（英文 → 中文）：\n{glossary}\n\n当前章节：{section_path}\n\n"
-                + (f"上文（仅供理解语境，不要翻译）：{context}\n\n" if context else "")
-                + "待翻译内容：\n" + db.dumps({"items": items}))
+        user = (f"Paper title: {paper['title']}\n\nGlossary (original → translation):\n{glossary}\n\n"
+                f"Current section: {section_path}\n\n"
+                + (f"Preceding text (context only - do not translate): {context}\n\n" if context else "")
+                + "Items to translate:\n" + db.dumps({"items": items}))
         data, _ = client.chat_json([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                    thinking=False, max_tokens=8192, temperature=0.3, kind="translate", paper_id=paper["id"])
         got: dict[str, str] = {}
-        for t in data.get("translations", []) if isinstance(data.get("translations"), list) else []:
-            if isinstance(t, dict) and t.get("id") in masked and isinstance(t.get("text"), str) and t["text"].strip():
-                got[t["id"]] = t["text"].strip()
+        for x in data.get("translations", []) if isinstance(data.get("translations"), list) else []:
+            if isinstance(x, dict) and x.get("id") in masked and isinstance(x.get("text"), str) and x["text"].strip():
+                got[x["id"]] = x["text"].strip()
         retry: list[Unit] = []
         for u in pending:
             if u.id not in got:
@@ -198,28 +220,32 @@ def translate_chunk(client: BaseClient, paper: dict[str, Any], chunk: list[Unit]
     return results
 
 
-def _save(paper_id: str, unit: Unit, text: str, flags: list[str], model: str) -> None:
+def _save(paper_id: str, lang: str, unit: Unit, text: str, flags: list[str], model: str) -> None:
     db.execute(
-        "INSERT INTO translations(paper_id, unit_id, section_id, text, flags, model, created_at) VALUES(?,?,?,?,?,?,?) "
-        "ON CONFLICT(paper_id, unit_id) DO UPDATE SET text=excluded.text, flags=excluded.flags, model=excluded.model, "
+        "INSERT INTO translations(paper_id, unit_id, lang, section_id, text, flags, model, created_at) VALUES(?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(paper_id, unit_id, lang) DO UPDATE SET text=excluded.text, flags=excluded.flags, model=excluded.model, "
         "created_at=excluded.created_at",
-        (paper_id, unit.id, unit.section_id, text, db.dumps(flags) if flags else None, model, db.now_iso()),
+        (paper_id, unit.id, lang, unit.section_id, text, db.dumps(flags) if flags else None, model, db.now_iso()),
     )
 
 
 def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bool = False) -> dict[str, Any]:
     settings = settings_store.get_settings()
     if not settings["ai"]["features"].get("translate", True):
-        raise AppError("全文翻译功能已在设置中关闭。", code="feature_disabled")
+        raise AppError(t("err.feature_disabled", feature=t("ai.label.translate")), code="feature_disabled")
     paper = papers_repo.get_paper(paper_id)
     if not paper:
-        raise AppError("论文不存在", status_code=404)
+        raise AppError(t("err.paper_not_found"), status_code=404)
+    lang = prompts.output_language()
     client = get_client()
-    client.on_wait = lambda s: job.update(message=f"{client.label} 请求频率受限，等待 {int(s + 0.5)} 秒后继续…", force=True)
+    client.on_wait = lambda sec: job.update(message=t("job.tr.wait", provider=client.label, n=int(sec + 0.5)), force=True)
     try:
-        job.update(message="正在准备全文…", force=True)
+        job.update(message=t("job.tr.prepare"), force=True)
         doc = fetcher.ensure(paper, job)
         job.check_cancelled()
+        source = doc_language(doc, paper)
+        if source == lang:
+            raise AppError(t("err.translate_same_language", language=t(f"lang.{lang}")), code="same_language")
 
         all_units = collect_units(doc, settings["ai"]["translate_appendix"])
         if section_ids:
@@ -227,26 +253,27 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
             all_units = [u for u in all_units if u.section_id in wanted]
             if force:
                 marks = ",".join("?" for _ in wanted)
-                db.execute(f"DELETE FROM translations WHERE paper_id = ? AND section_id IN ({marks})", (paper_id, *wanted))
+                db.execute(f"DELETE FROM translations WHERE paper_id = ? AND lang = ? AND section_id IN ({marks})",
+                           (paper_id, lang, *wanted))
         elif force:
-            db.execute("DELETE FROM translations WHERE paper_id = ?", (paper_id,))
-        done = translated_map(paper_id)
+            db.execute("DELETE FROM translations WHERE paper_id = ? AND lang = ?", (paper_id, lang))
+        done = translated_map(paper_id, lang)
         todo = [u for u in all_units if u.id not in done]
         if not todo:
             job.update(progress=len(all_units), total=len(all_units), force=True)
-            job.finish("全文已翻译完成")
+            job.finish(t("job.tr.already_done"))
             return {"translated": 0, "failed": 0, "total": len(all_units)}
 
-        job.update(message="正在生成术语表…", progress=len(all_units) - len(todo), total=len(all_units), force=True)
+        job.update(message=t("job.tr.glossary"), progress=len(all_units) - len(todo), total=len(all_units), force=True)
         try:
-            glossary = ensure_glossary(client, paper, doc)
+            glossary = ensure_glossary(client, paper, doc, source, lang)
         except AIError as e:
             if e.code in FATAL_CODES:
                 raise
             log.warning("glossary failed: %s", e.message)
             glossary = []
         gtext = _glossary_text(glossary)
-        system = prompts.translation_system(settings["ai"]["keep_english_terms"])
+        system = prompts.translation_system(settings["ai"]["keep_english_terms"], source, lang)
         paths = _section_path(doc)
         titles = {s["id"]: " ".join(x for x in [s.get("number"), s.get("title")] if x) for s in doc["sections"]}
 
@@ -266,8 +293,8 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
             ctx = flat[first - 1].text[-400:] if first > 0 else ""
             sec_title = titles.get(chunk[0].section_id, "")
             sec_ids = list(dict.fromkeys(u.section_id for u in chunk))
-            path = "；".join(paths.get(sid, "") for sid in sec_ids[:4])
-            job.update(message=f"正在翻译：{sec_title[:40]}")
+            path = "; ".join(paths.get(sid, "") for sid in sec_ids[:4])
+            job.update(message=t("job.tr.section", section=sec_title[:40]))
             try:
                 res = translate_chunk(client, paper, chunk, ctx, path, gtext, system)
             except AIError as e:
@@ -280,7 +307,7 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
             for u in chunk:
                 if u.id in res:
                     text, flags = res[u.id]
-                    _save(paper_id, u, text, flags, client.model)
+                    _save(paper_id, lang, u, text, flags, client.model)
                 else:
                     with lock:
                         failed.append(u.id)
@@ -296,19 +323,19 @@ def run(job: Job, paper_id: str, section_ids: list[str] | None = None, force: bo
         if job.cancelled:
             raise JobCancelled()
         if failed:
-            msg = errors[0] if errors else "部分段落未能翻译"
-            job.finish(f"{len(failed)} 段翻译失败，可点击「继续翻译」重试。原因：{msg}", status="partial")
+            why = errors[0] if errors else t("job.tr.some_failed")
+            job.finish(t("job.tr.partial", n=len(failed), reason=why), status="partial")
         else:
-            job.finish("翻译完成")
+            job.finish(t("job.tr.done"))
         return {"translated": len(todo) - len(failed), "failed": len(failed), "total": len(all_units),
                 "errors": list(dict.fromkeys(errors))[:3]}
     finally:
         client.close()
 
 
-def status(paper_id: str, doc: dict[str, Any] | None) -> dict[str, Any]:
+def status(paper_id: str, doc: dict[str, Any] | None, lang: str | None = None) -> dict[str, Any]:
     settings = settings_store.get_settings()
-    tmap = translated_map(paper_id)
+    tmap = translated_map(paper_id, lang)
     if not doc:
         return {"total": 0, "done": len(tmap), "sections": {}}
     units = collect_units(doc, settings["ai"]["translate_appendix"])

@@ -79,7 +79,17 @@ def _pick_port(start: int) -> tuple[int, bool]:
             return port, True
         if not st and _port_free(port):
             return port, False
-    raise SystemExit(f"端口 {start}-{start + 19} 都被占用，无法启动 PaperLook。")
+    raise SystemExit(_t("desktop.ports_busy", start=start, end=start + 19))
+
+
+def _t(key: str, **params) -> str:
+    """Interface text for desktop dialogs: the user's language once the database is open, else the system's."""
+    from . import i18n
+    try:
+        lang = i18n.current()
+    except Exception:
+        lang = i18n.system_language()
+    return i18n.t(key, lang, **params)
 
 
 def main(port: int = config.DEFAULT_PORT) -> None:
@@ -104,7 +114,7 @@ def main(port: int = config.DEFAULT_PORT) -> None:
             break
         time.sleep(0.05)
     if not server.started:
-        _message("PaperLook 启动失败，详细原因见日志：\n" + str(config.log_dir() / "paperlook.log"))
+        _message(_t("desktop.start_failed", log=str(config.log_dir() / "paperlook.log")))
         raise SystemExit(1)
 
     try:
@@ -112,8 +122,7 @@ def main(port: int = config.DEFAULT_PORT) -> None:
     except Exception:
         log.exception("could not open the app window, falling back to the browser")
         webbrowser.open(url)
-        _message(f"PaperLook 已在浏览器中打开（{url}）。\n\n本机缺少内置浏览器组件 WebView2，所以没有使用独立窗口。"
-                 "\n点击「确定」将退出 PaperLook。")
+        _message(_t("desktop.no_webview", url=url))
     finally:
         server.should_exit = True
         thread.join(10)
@@ -134,4 +143,4 @@ def _run_window(url: str) -> None:
     storage = config.DATA_DIR / "webview"  # keep the page's local storage (theme etc.) between runs
     storage.mkdir(parents=True, exist_ok=True)
     webview.start(private_mode=False, storage_path=str(storage),
-                  localization={"windows.fileFilter.allFiles": "所有文件"})  # "Save as" dialog of downloads
+                  localization={"windows.fileFilter.allFiles": _t("desktop.all_files")})  # "Save as" dialog

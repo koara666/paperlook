@@ -19,10 +19,11 @@
 │  fulltext/   fetcher → arxiv_html（LaTeXML 解析）| pdf（PyMuPDF4LLM）→ 统一文档模型 │
 │  ai/         client(DeepSeek | Gemini) · prompts · translate · analyze · rerank   │
 │  settings_store · directions · papers(仓储) · secrets_store · export · db(SQLite)  │
+│  i18n（四种界面语言：zh/en/ja/ko；存储的消息在返回时按当前语言渲染）              │
 └───────────────┬─────────────────────────────┬─────────────────────────────────────┘
                 │                             │
-     arXiv / OpenAlex / S2 / PubMed      DeepSeek 或 Gemini API（仅在用户点击后调用）
-     / Hugging Face Daily Papers          api.deepseek.com / generativelanguage.googleapis.com
+     arXiv / OpenAlex / CiNii / S2       DeepSeek 或 Gemini API（仅在用户点击后调用）
+     / PubMed / Hugging Face Daily Papers api.deepseek.com / generativelanguage.googleapis.com
 ```
 
 单进程、单机、单用户。两种运行方式共用同一套代码：
@@ -40,12 +41,14 @@
 | `config.py` | 路径常量（`DATA_DIR`：源码版 `data/`，安装版 `%LOCALAPPDATA%\PaperLook`，可用 `PAPERLOOK_DATA_DIR` 覆盖） |
 | `db.py` | SQLite（WAL，线程级连接）、版本化迁移 `MIGRATIONS`、kv 缓存 |
 | `settings_store.py` | 用户设置（单个 JSON 文档）、默认值、校验、排序预设 |
+| `i18n.py` / `i18n_catalog.py` | 后端多语言：`t(key, **p)` 立即翻译；`msg(key, **p)` 生成存储用的消息 `{"$t": key, "p": {…}}`，返回前端时由 `render()` 按当前语言渲染（1.x 存下的中文文字按 `PERSISTED` 模板反查后重新渲染）；目录每条是 (zh, en, ja, ko)，英文复数写成 `"one|other"`。当前语言 = `settings.language`，为空时跟随系统语言 |
+| `textutil.py` | Unicode 规范化（NFKC；只对拉丁字母去重音）、标题键、CJK 判断、论文语言检测 `detect_language`（标题优先；有假名即日文；拉丁文字按停用词） |
 | `secrets_store.py` | API Key：keyring → Windows DPAPI 加密文件 → 仅限本人可读文件 |
-| `directions.py` | 研究方向 CRUD、9 个预设、arXiv 分类表 |
+| `directions.py` | 研究方向 CRUD（含每个方向的时间范围、论文语言、学科）、6 组 48 个预设（覆盖理工医社科人文）、arXiv 分类表、OpenAlex 学科表 |
 | `papers.py` | 论文仓储：合并写入、用户状态、已推荐身份集合 |
 | `jobs.py` | 后台任务：进度、取消、重启后标记中断、同 (kind, paper) 去重 |
-| `sources/` | `base.py`（RawPaper、HTTP 重试、限速）+ arxiv / openalex / semantic_scholar / pubmed / hf_daily；注册表在 `sources/__init__.py` |
-| `recommend/` | `engine`（流程编排）、`dedupe`、`relevance`、`quality`、`venues`（顶会/期刊表）、`freshness`、`feedback`（用户反馈偏好）、`ranker` |
+| `sources/` | `base.py`（RawPaper、HTTP 重试、限速）+ arxiv / openalex / cinii（日文论文）/ semantic_scholar / pubmed / hf_daily；注册表在 `sources/__init__.py` |
+| `recommend/` | `engine`（流程编排）、`dedupe`、`relevance`、`quality`、`venues`（顶会/期刊匹配）、`venue_lists`（各学科与中日韩旗舰期刊表）、`field_norms`（OpenAlex 各学科期刊统计的分位数）、`freshness`、`feedback`（用户反馈偏好）、`ranker` |
 | `fulltext/` | `model`（文档结构与可翻译单元）、`arxiv_html`、`pdf`、`fetcher`（来源选择与缓存） |
 | `ai/` | `client`（`BaseClient` → `DeepSeekClient` / `GeminiClient`：重试、错误映射、限速、用量记录）、`prompts`、`translate`、`analyze`、`rerank` |
 | `export.py` | 译文/AI 分析（含笔记）导出为 Markdown |
@@ -55,24 +58,26 @@
 | `packaging/` | `paperlook.spec`（PyInstaller）、`installer.iss`（Inno Setup，按用户安装）、`build_windows.ps1`（打包 + 冒烟测试 + zip + 安装包）、`paperlook_app.py`（exe 入口） |
 | `.github/workflows/` | `ci.yml`（测试、前端产物一致性、启动脚本冒烟测试）、`release.yml`（`v*` 标签 → 发布） |
 | `scripts/` | `ensure_deps.py`（源码版依赖安装）、`release_notes.py`（从 CHANGELOG 生成 Release 说明） |
-| `frontend/src/` | `api/`（类型、请求、hooks）、`components/`（ui、layout、papers）、`pages/`（Today、Library、Paper、Settings 及子组件）、`lib/`（KaTeX 渲染、格式化、主题） |
+| `frontend/src/` | `api/`（类型、请求、hooks）、`i18n/`（`index.tsx` 提供 `useT`/`t`/`rich`，`zh.ts` 为基准词典，`en/ja/ko.ts` 类型上必须包含同样的键）、`components/`（ui、layout、papers）、`pages/`（Today、Library、Paper、Settings 及子组件）、`lib/`（KaTeX 渲染、格式化、主题） |
 
 ## 3. 数据流
 
 ### 3.1 每日推荐（`POST /api/recommend/run` → job "recommend"）
 
-1. 读取启用的方向与来源；检索时间窗口 `[今天 - N 天, 今天]`。
+1. 读取启用的方向与来源；检索时间窗口 `[今天 - N 天, 今天]`。方向可以有自己的时间范围（`window_days`，人文类预设 90–180 天）：检索按「本次窗口与各方向窗口的最大值」进行，候选资格按论文所属方向的窗口判断。
 2. **检索**：各来源并行、来源内按方向串行（arXiv 遵守 3 秒/请求）。每个方向自动生成查询：
    - arXiv：`(cat:A OR cat:B) AND (ti:"kw" OR abs:"kw" …) AND submittedDate:[…]`，按相关度取前 200（一次请求）。arXiv 自 2026 年常按 IP 返回 429「Rate exceeded」（无 Retry-After，封禁远长于重试窗口）：只重试 1 次，之后由 `engine._arxiv_fallback` 通过 OpenAlex 检索 arXiv 论文（`primary_location.source.id:S4306400194`；日期与 arXiv v1 一致——实测 21/21，但新论文要晚几天才被收录；不当作期刊，不计期刊统计），`source_stats.arxiv.fallback` 记录补充数量。
-   - OpenAlex：`title_and_abstract.search:"kw" OR …`，过滤发布日期、排除 repository（arXiv 已直接检索；只在 arXiv 失败时用于补充）。
+   - OpenAlex：`title_and_abstract.search:"kw" OR …`（中日韩关键词加引号，否则会被拆成单字），过滤发布日期；排除 arXiv（已直接检索；只在 arXiv 失败时用于补充）、Zenodo、Figshare；类型限 article / preprint / review / book-chapter / report（report 只保留旗舰来源，如 NBER）。每个方向两次检索：全部来源 100 篇 + 仅 CWTS 核心期刊 50 篇（避免大量低质量期刊挤掉好期刊）。方向设置了论文语言时加 `language:` 过滤。
+   - CiNii Research（日本 NII，开放 OpenSearch 接口）：只在方向含中日韩关键词或选择了日文/中文时检索；去掉没有 DOI / 机构库链接 / 学术出版者、又不在旗舰表中的杂志文章。中国知网、万方、韩国 KCI 没有开放接口，无法接入（界面已说明）。
    - Semantic Scholar（bulk search，布尔查询）/ PubMed（esearch + efetch）。
    - 候选池缓存 2 小时（`kv_cache` 的 `pool:*`），「再推荐几篇」无需重新检索；有来源失败的候选池（`partial`）只沿用 10 分钟。
 3. **去重合并**（dedupe）：arXiv ID / DOI（含 10.48550/arxiv.*）/ PMID / 规范化标题；优先 arXiv 的标题摘要，补齐期刊、DOI、引用等；发布日期取各来源中**最早的精确日期**。
-4. **时间过滤**：只保留发布日期在窗口内且日期可靠（exact/approx）的论文；日期未知的排除并计数。
+4. **时间过滤**：只保留发布日期在窗口内且日期可靠（exact/approx）的论文；日期未知的排除并计数。勘误、撤稿声明等（`notices`）直接排除；方向限定了论文语言时，其他语言的论文不进入该方向（`other_language` 计数）。
 5. **去重复推荐**：已推荐或「不感兴趣」的论文（按身份键）永不再出现。
 6. **信号增强**：HF Daily Papers 点赞数（按天缓存）、OpenAlex 期刊/会议统计（30 天缓存）。
 7. **评分与选择**（见第 5 节），之后按用户反馈调整相关度（`settings.personalize`，默认开），可选 AI 精排（显式开启；`auto` 模式永不调用 AI）。
-8. **持久化**：`rec_batches` + `recommendations`（含评分构成 breakdown 与中文推荐理由），论文写入 `papers`。
+8. **持久化**：`rec_batches` + `recommendations`（含评分构成 breakdown 与推荐理由），论文写入 `papers`。理由、质量标签、提示信息都存为 `msg()` 消息，切换界面语言后历史推荐也按新语言显示。
+9. **提示**：某方向候选少于 3 篇时 `stats.hints.sparse` 列出这些方向，界面提供「把该方向的时间范围放宽」的按钮；整体太少时建议放宽本次时间范围（`widen_to`）。
 
 ### 3.2 全文（`POST /papers/{id}/fulltext` → job "fulltext"，免费，打开标签即自动执行）
 
@@ -80,6 +85,7 @@
 
 ### 3.3 全文翻译（`POST /papers/{id}/translate` → job "translate"）
 
+0. 目标语言 = `prompts.output_language()`（`settings.ai.output_language`，`auto` 时等于界面语言）。原文语言由全文检测；与目标语言相同时拒绝翻译（`same_language`），界面显示「无需翻译」。译文与术语表按 (论文, 单元, 语言) 保存，切换语言不会覆盖已有译文。
 1. 文档 → 可翻译单元：章节标题、段落、段内标题、列表项、图/表/算法标题。公式、代码、表格正文、参考文献不发送。
 2. 行内公式 `$…$` 替换为 `⟦M1⟧` 占位符，返回后还原并校验，缺失则重试一次并标记。
 3. 首次翻译先生成术语表（`ai_results.kind = glossary`），每个请求都带上，保证译名一致。
@@ -89,7 +95,9 @@
 
 ### 3.4 AI 分析（`POST /papers/{id}/ai/{summary|modules|contributions|abstract_translation}`）
 
-尝试获取全文（`plain_text` ≤ 18 万字符，不含参考文献）→ 失败则用摘要并在结果中记录 `basis.type = abstract` 与原因 → JSON 模式调用（可选深度思考）→ 创新点的作者原文引用用 4-gram 重合度核验（exact/close/partial/not_found）→ 写入 `ai_results`。已有结果时不带 `force` 的请求直接返回 `cached`。
+尝试获取全文（`plain_text` ≤ 18 万字符，不含参考文献）→ 失败则用摘要并在结果中记录 `basis.type = abstract` 与原因 → JSON 模式调用（可选深度思考）→ 创新点的作者原文引用用重合度核验（拉丁文字 4-gram 词，中日韩 6-gram 字；exact/close/partial/not_found）→ 写入 `ai_results`（主键含 `lang`）。已有**当前语言**的结果时不带 `force` 的请求直接返回 `cached`；只有其他语言的结果时照常显示，并标注「用×语生成」、提供「用当前语言重新生成」。
+
+提示词用英文写，并明确写出输出语言与该语言的写作习惯（`prompts.LANGUAGE` / `STYLE`）；适用于任何学科（人文类论文的「模块」是论证结构与史料）。论文引用古典语言（文言文、汉文训读、拉丁文等）时要求逐字保留原文并在括号中给出现代译文。
 
 消息顺序为「system（固定）→ 论文信息与全文 → 任务说明」：三项分析共享「system + 论文」长前缀，先后运行时后两项约 96% 的输入命中 DeepSeek 上下文缓存（实测）；任务放在长文档之后也更利于模型遵循指令。文字字段中的数学符号要求用 `$…$` 包裹，前端用 `MathText` 渲染；`key_formula` 用 `MathWrap`（行内 + `\displaystyle`，可在关系符处换行）。
 
@@ -98,46 +106,59 @@
 | 表 | 内容 |
 | --- | --- |
 | `settings` | `key='user'` 的设置 JSON |
-| `directions` | 研究方向（关键词、排除词、分类为 JSON 数组） |
-| `papers` | 合并后的论文元数据；`signals`（引用、HF 点赞、代码链接、期刊 ID…）与 `sources` 为 JSON |
+| `directions` | 研究方向（关键词、排除词、分类、论文语言 `languages`、学科 `fields` 为 JSON 数组；`window_days` 为空表示跟随本次时间范围） |
+| `papers` | 合并后的论文元数据；`language`（检测得到）；`signals`（引用、HF 点赞、代码链接、期刊 ID、OpenAlex 学科…）与 `sources` 为 JSON |
 | `paper_state` | 已读、收藏、不感兴趣、打开时间、笔记（概览页「我的笔记」，≤ 2 万字） |
 | `rec_batches` / `recommendations` | 每次推荐的参数、统计、提示信息；每篇的排名、分数、breakdown、理由、方向、AI 精排结果 |
 | `fulltext` | 解析后的文档 JSON |
-| `translations` | 按单元保存的译文（unit_id 与文档块 id 对应） |
-| `ai_results` | summary / modules / contributions / abstract_translation / glossary 结果、依据、模型、用量 |
+| `translations` | 按 (paper_id, unit_id, lang) 保存的译文（unit_id 与文档块 id 对应） |
+| `ai_results` | 按 (paper_id, kind, lang) 保存的 summary / modules / contributions / abstract_translation / glossary 结果、依据、模型、用量 |
 | `jobs` | 任务状态（重启时把运行中的标记为 interrupted） |
 | `api_usage` | 每次 DeepSeek 调用的 tokens（不含任何内容） |
 | `kv_cache` | 候选池、HF 每日列表、期刊统计、模型列表、上次连接测试 |
 
-迁移：在 `db.MIGRATIONS` 末尾追加新脚本（`PRAGMA user_version` 记录版本），**不要修改已发布的脚本**。
+迁移：在 `db.MIGRATIONS` 末尾追加新脚本（`PRAGMA user_version` 记录版本），**不要修改已发布的脚本**。迁移 2（1.3.0）：方向加语言/学科/时间范围，论文加语言，译文与 AI 结果的主键加 `lang`（1.x 的数据视为中文）。
 
 ## 5. 推荐排序模型
 
 ```
-score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.55 / 0.25 / 0.20，和为 1）
+score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.50 / 0.30 / 0.20，和为 1）
+        − 0.15（论文所属 OpenAlex 学科不在方向的学科中）− 0.15（书评、社论等短文）
+        + 0.08（综述，仅在开启「优先推荐综述」时）
 ```
 
-- **relevance**（relevance.py）：关键词在标题命中计 1.0，仅摘要命中计 0.55–0.8（次数越多越高）；多关键词以 noisy-OR 合并 `1 − Π(1 − 0.6·s_k)`；arXiv 主分类吻合 +0.12、交叉分类 +0.06。连字符/空格/复数不敏感；全大写缩写（RAG、CLIP）区分大小写。排除词按方向生效。**相关度 < 0.3 的论文不进入候选**——质量与时效再高也不会推荐无关论文。开启 AI 精排时：`relevance = 0.4·关键词 + 0.6·AI 评分`。
-- **quality**（quality.py + venues.py）：只用可验证信号——venue 0.40（作者注明的接收/发表，排除 submitted/under review/ARR；或 OpenAlex 期刊 2 年平均被引）、citations 0.25（仅发表 ≥30 天的论文，按月均被引或 OpenAlex 百分位）、community 0.20（HF 点赞）、completeness 0.15（开源代码、页数）。按证据量收缩到中性值：`quality = c·observed + (1−c)·0.5`，`c` = 已有信号权重和。没有证据的新论文就是 0.5，不加分也不扣分。
-- **freshness**（freshness.py）：`0.2 + 0.8 · 0.5^(age/半衰期)`，半衰期 3/7/21 天（偏好最新/均衡/不太在意）；近似日期 ×0.85。时间窗口只决定能否成为候选，freshness 只影响排序。
+- **relevance**（relevance.py）：关键词在标题命中计 1.0，仅摘要命中计 0.55–0.8（次数越多越高）；多关键词以 noisy-OR 合并 `1 − Π(1 − 0.6·s_k)`；arXiv 主分类吻合 +0.12、交叉分类 +0.06。连字符/空格/复数不敏感；全大写缩写（RAG、CLIP）区分大小写；中日韩关键词不要求词边界（「宋代」匹配「论宋代的…」），拉丁关键词在中文里也能匹配（「基于transformer的…」）。排除词按方向生效。**相关度 < 0.36 的论文不进入候选**——摘要里只顺带提到一次关键词（0.33）不够，质量与时效再高也不会推荐无关论文。开启 AI 精排时：`relevance = 0.4·关键词 + 0.6·AI 评分`。
+- **quality**（quality.py + venues.py + venue_lists.py + field_norms.py）：只用可验证信号——venue 0.55、citations 0.25、community 0.12、completeness 0.08。按证据量收缩到中性值：`quality = c·observed + (1−c)·0.5`，`c` = 已有信号权重和。没有证据的新论文就是 0.5，不加分也不扣分。
+  - venue：作者注明的接收/发表（排除 submitted/under review/ARR）；或旗舰期刊表（A 档 1.0、B 档 0.8；计算机顶会、各学科旗舰期刊、中日韩代表性期刊，含 OpenAlex 使用的罗马字/英文刊名）；否则用 OpenAlex 期刊统计**在论文所属学科内比较**：`pct = 0.4·分位(2 年平均被引) + 0.6·分位(h 指数)`（人文期刊的被引约为计算机的 1/40，不比较就会全被当成低质量）。CWTS 核心期刊 `0.15 + 0.75·pct`；非核心期刊 `min(0.5, 0.1 + 0.6·pct)`，被引高也不加分；非核心且被引低（低质量/掠夺性期刊的典型特征）按满权重计入、不收缩。2 年被引为 0 且 h ≤ 5 视为没有数据。
+  - citations：只用于发表 ≥ 90 天的论文（OpenAlex 学科百分位或月均被引）；0 次被引要满一年才计入。
+  - 非英文论文：OpenAlex 对中日韩论文的引用统计很少（旗舰期刊也接近 0），所以只有正面证据计入，偏低的统计视为没有数据。
+  - 综述（标题含 survey/review/综述/総説/연구 동향… 或 OpenAlex 类型 review）显示「综述」标记。
+- **freshness**（freshness.py）：`0.2 + 0.8 · 0.5^(age/半衰期)`，半衰期 3/7/21 天（偏好最新/均衡/不太在意），且不小于方向时间范围的 1/6（180 天的人文方向半衰期 30 天）；近似日期 ×0.85。时间窗口只决定能否成为候选，freshness 只影响排序。
 - **跨方向选择**（ranker.py）：每篇归入最匹配的方向；名额按「关注程度」权重用最大余数法分配；某方向候选不足时名额让给其他方向的高分论文；最终按总分排序。
 - **用户反馈偏好**（feedback.py）：正向反馈 = 收藏/有笔记（权重 1）、用 AI 翻译或分析过（0.6）、打开过（0.25）；负向 = 不感兴趣（1）。候选与反馈论文按 TF-IDF（标题计两次 + 标题二元组 + 摘要，去停用词）余弦相似度比较：`affinity = 前 3 个加权正向相似度的均值 − 前 3 个负向相似度的均值`，`adjust = 0.15 · tanh((affinity − 全部候选的中位数) / 0.08)`，加到 relevance（截断到 [0, 1]）。以中位数居中，所以只改变相对顺序；与 freshness 一样不决定候选资格（`MIN_RELEVANCE` 仍只看关键词）。正向（权重 ≥ 0.6）或负向反馈都少于 3 篇时不生效。breakdown 记录 `preference`（调整量与最相近的反馈论文），推荐理由写明「与你收藏的《…》相近」。
 - **自定义权重**：归一化后相关度不低于 20%。
 
-## 6. AI 服务接入
+## 6. 多语言
+
+- 界面语言：`zh`（简体中文）、`en`、`ja`、`ko`。首次启动跟随系统语言（前端 `navigator.languages`，后端 Windows `GetUserDefaultUILanguage` / `LANG`）；右上角（手机为页头）的语言菜单与「设置 → 语言」都会写入 `settings.language` 并让前端整体重新挂载、刷新所有请求。
+- 前端文字全部来自 `frontend/src/i18n/*.ts`；后端返回的文字（错误、任务进度、推荐理由、质量标签、来源说明、导出标题）来自 `i18n_catalog.py`。`test_i18n.py` 检查两边四种语言的键与占位符一致。
+- 论文语言（`papers.language`）只用于显示与判断是否需要翻译；方向的「论文语言」用于筛选候选。
+- AI 输出语言：`settings.ai.output_language`，默认 `auto`（等于界面语言）。
+
+## 7. AI 服务接入
 
 `settings.ai.provider` 选择 `deepseek`（默认）或 `gemini`；`ai/client.get_client()` 返回对应客户端，翻译/分析代码只用 `chat` / `chat_json`。两者共用：重试（可重试错误退避，服务端给出 `retry_after` 时按它等待）、JSON 截断时加大输出上限重试、JSON 解析失败重试一次（写 warning 日志）、`api_usage` 记账。`parse_json` 在解析前把未转义的 LaTeX 反斜杠读作 LaTeX（`_fix_latex_escapes`：非法转义一律加倍；`\f`/`\b`/`\r` 后跟字母、`\t`/`\n` 后跟 LaTeX 命令名时也视为 LaTeX，正确转义的 JSON 不变），解析失败时再修正用错的结束括号（`_fix_closers`，如 `>` → `]`）。这两种错误都在真实的 gemini-3.5-flash-lite 输出中出现过。Key 分别存为 `deepseek_api_key` / `gemini_api_key`。
 
-### 6.1 DeepSeek
+### 7.1 DeepSeek
 
 - OpenAI 兼容 `POST {base_url}/chat/completions`；模型默认 `deepseek-flash`（另有 `deepseek-v4-pro`，列表也从 `GET /models` 获取）。
 - 思考模式：请求体 `thinking: {type: enabled|disabled}`（DeepSeek V4 起默认开启）。翻译固定关闭；分析由设置「深度思考」控制。若兼容端点不认识该字段（400/422 含 thinking），自动去掉后重试。
 - JSON 模式 `response_format: {type: json_object}`；输出被截断（finish_reason=length）时自动加大 max_tokens 重试；JSON 解析失败重试一次。
-- 错误映射：401 Key 无效、402 余额不足、429 限流（退避重试）、400/422 参数或模型不可用、404 服务地址错误、5xx/503 服务异常（重试）、网络/超时。所有消息为中文并带解决方法，前端原样显示。
+- 错误映射：401 Key 无效、402 余额不足、429 限流（退避重试）、400/422 参数或模型不可用、404 服务地址错误、5xx/503 服务异常（重试）、网络/超时。所有消息按界面语言给出并带解决方法，前端原样显示。
 - 连接测试：`GET /models`（鉴权）→ `GET /user/balance`（余额）→ 8 tokens 的对话调用。
 - 用量：每次调用的 prompt/completion/cache-hit tokens 记入 `api_usage`。
 
-### 6.2 Gemini（`GeminiClient`，原生 `generateContent` 接口）
+### 7.2 Gemini（`GeminiClient`，原生 `generateContent` 接口）
 
 - `POST {base_url}/v1beta/models/{model}:generateContent`，Key 放在 `x-goog-api-key` 头；system 消息 → `systemInstruction`；JSON 模式 → `responseMimeType: application/json`；思考强度 → `thinkingConfig.thinkingLevel`（翻译 `minimal`，不支持时退到 `low`，再不行就不传；深度思考 `high`）。模型不支持系统指令 / JSON 模式 / 某个思考级别时（400），自动降级并按模型记住（`_gemini_compat`）。
 - 没用 OpenAI 兼容端点：它仍是 beta，错误信息里没有配额详情（`QuotaFailure`、`RetryInfo`），而这些是区分「每分钟限流」与「当天额度用完」的关键。
@@ -147,21 +168,21 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 - 用量：`promptTokenCount`、`candidatesTokenCount + thoughtsTokenCount`、`cachedContentTokenCount` 记入 `api_usage`；「今日已用」按太平洋时间 0 点（无需时区库，`_us_pacific_offset` 按美国夏令时规则计算）统计成功请求数。
 - 网络：`ai.gemini.proxy`（http/https/socks5，留空则 httpx 读取系统代理）；`ai.gemini.base_url` 可改为自建中转。
 
-### 6.3 版本、CI 与发布
+### 7.3 版本、CI 与发布
 
 - 版本号：`paperlook.__version__` 与 `frontend/package.json`，遵循 SemVer（含义见 `CHANGELOG.md` 开头），测试校验一致性。
 - CI（每次推送 / PR）：Windows（Python 3.14、3.13）、Ubuntu（3.11，最低支持版本）、macOS（3.13）跑 pytest；Ubuntu 上 `npm ci && npm run build` 后要求 `backend/paperlook/static/` 无变化（`.gitattributes` 让前端源码在各平台都是 LF、构建产物按字节存储，保证构建结果一致）；三个系统都用 `start.bat` / `start.sh` 在全新环境中启动并请求 `/api/health` 与首页。
 - 发布（推送 `vX.Y.Z` 标签）：校验标签与版本号一致 → pytest → PyInstaller 打包 → 启动 exe 冒烟测试 → zip + Inno Setup 安装包 → GitHub Release（说明取自 CHANGELOG 对应小节 + 安装说明）。
 - 检查更新：`GET /api/update` 只在用户点击时请求 GitHub Releases API，只比较版本号、给出下载链接，不自动下载安装。
 
-## 7. 安全
+## 8. 安全
 
 - 服务只监听 `127.0.0.1`；中间件拒绝非 localhost 的 Host（防 DNS rebinding），拒绝跨站 Origin 的写请求（防止其他网页驱动本地 API 消耗额度）。
 - API Key 存于系统凭据管理器（`keyring`，服务名 `PaperLook`）；不可用时 Windows 上用 DPAPI 加密文件 `data/secrets.bin`；其他系统退化为仅本人可读的文件（文档已说明）。
 - 前端只能拿到打码后的 Key；日志中不记录请求头和 URL（httpx 日志降到 WARNING；OpenAlex Key 走 Authorization 头而非 URL）。
 - 备份导出只包含数据库表，不含 Key。
 
-## 8. 关键技术决策
+## 9. 关键技术决策
 
 | 决策 | 原因 |
 | --- | --- |
@@ -177,5 +198,8 @@ score = w_r · relevance + w_q · quality + w_f · freshness        （默认 0.
 | Semantic Scholar 默认关闭 | 匿名访问频繁 429；有免费 Key 时可开启 |
 | HF Daily Papers 只作为排序信号 | 它不是学术数据库，但点赞数是真实可验证的社区关注度；未上榜不视为负面 |
 | 质量分无证据时取中性 0.5 | 避免虚构评级；新论文不因没有引用而被惩罚 |
+| 期刊统计按学科比较，并维护旗舰期刊表 | 不同学科的被引水平相差数十倍；中日韩期刊在 OpenAlex 中几乎没有引用数据，只能靠人工整理的表识别 |
+| 提示词用英文写、明确指定输出语言 | 一套提示词支持四种输出语言；英文指令对 DeepSeek 与 Gemini 都最稳定，输出语言单独强调可避免中英混杂 |
+| 不接入中国知网、万方、KCI | 没有开放接口，抓取网页违反其条款；中文论文只能覆盖 OpenAlex 收录的部分，界面如实说明 |
 | SQLite + JSON 列 | 单用户本地应用的最简单可靠方案，易备份，结构可迁移 |
 | 进程内任务 + 前端轮询 | 比 WebSocket/消息队列简单可靠；任务状态写库，重启可恢复已完成部分 |

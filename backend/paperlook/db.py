@@ -187,6 +187,46 @@ MIGRATIONS: list[str] = [
         fetched_at TEXT
     );
     """,
+    # 2 (1.3): output language of translations / AI results (rows before 1.3 are Chinese), the language of
+    # each paper, and per-direction paper languages, time window and fields of study.
+    """
+    ALTER TABLE directions ADD COLUMN languages TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE directions ADD COLUMN window_days INTEGER;
+    ALTER TABLE directions ADD COLUMN fields TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE papers ADD COLUMN language TEXT;
+
+    CREATE TABLE translations_v2 (
+        paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        unit_id TEXT NOT NULL,
+        lang TEXT NOT NULL DEFAULT 'zh',
+        section_id TEXT,
+        text TEXT,
+        flags TEXT,
+        model TEXT,
+        created_at TEXT,
+        PRIMARY KEY (paper_id, unit_id, lang)
+    );
+    INSERT INTO translations_v2(paper_id, unit_id, lang, section_id, text, flags, model, created_at)
+        SELECT paper_id, unit_id, 'zh', section_id, text, flags, model, created_at FROM translations;
+    DROP TABLE translations;
+    ALTER TABLE translations_v2 RENAME TO translations;
+
+    CREATE TABLE ai_results_v2 (
+        paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+        kind TEXT NOT NULL,
+        lang TEXT NOT NULL DEFAULT 'zh',
+        content TEXT,
+        basis TEXT,
+        model TEXT,
+        usage TEXT,
+        created_at TEXT,
+        PRIMARY KEY (paper_id, kind, lang)
+    );
+    INSERT INTO ai_results_v2(paper_id, kind, lang, content, basis, model, usage, created_at)
+        SELECT paper_id, kind, 'zh', content, basis, model, usage, created_at FROM ai_results;
+    DROP TABLE ai_results;
+    ALTER TABLE ai_results_v2 RENAME TO ai_results;
+    """,
 ]
 
 

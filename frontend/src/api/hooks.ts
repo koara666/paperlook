@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { t } from "../i18n";
 import { api } from "./client";
 import type {
   AiConfig,
@@ -167,7 +168,7 @@ export function useAiConfig() {
 /** Name of the active AI service ("DeepSeek" / "Gemini") for UI text. */
 export function useAiLabel() {
   const { data } = useAiConfig();
-  return data?.label ?? "AI 服务";
+  return data?.label ?? t("ai.service");
 }
 
 /** Gemini free tier counts requests, not tokens: rough number of requests to translate a paper. */

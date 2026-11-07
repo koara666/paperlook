@@ -16,6 +16,7 @@ from typing import Any, Callable
 
 from . import db
 from .errors import AppError
+from .i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class Job:
         self.status = "queued"
         self.progress = 0
         self.total = 0
-        self.message = "排队中…"
+        self.message = t("job.queued")
         self.error: str | None = None
         self.error_code: str | None = None
         self.result: Any = None
@@ -123,7 +124,8 @@ class JobManager:
         self._lock = threading.Lock()
 
     def recover_after_restart(self) -> None:
-        db.execute("UPDATE jobs SET status='interrupted', message='应用重启，任务已中断' WHERE status IN ('queued','running')")
+        db.execute("UPDATE jobs SET status='interrupted', message=? WHERE status IN ('queued','running')",
+                   (t("job.interrupted"),))
         # keep the table small
         db.execute("DELETE FROM jobs WHERE datetime(created_at) < datetime('now', '-30 days')")
 
@@ -148,28 +150,28 @@ class JobManager:
 
     def _run(self, job: Job, fn: Callable[[Job], Any]) -> None:
         job.status = "running"
-        job.update(message="正在处理…", force=True)
+        job.update(message=t("job.processing"), force=True)
         try:
             result = fn(job)
             job.result = result
             if job.status == "running":
                 job.status = "done"
             if not job._final_message:
-                job.message = "已完成"
+                job.message = t("job.finished")
         except JobCancelled:
             job.status = "cancelled"
-            job.message = "已停止"
+            job.message = t("job.stopped")
         except AppError as e:
             job.status = "failed"
             job.error = e.message
             job.error_code = e.code
-            job.message = "失败"
+            job.message = t("job.failed")
         except Exception as e:  # unexpected - log with traceback, show a short message
             log.error("Job %s (%s) crashed: %s\n%s", job.id, job.kind, e, traceback.format_exc())
             job.status = "failed"
-            job.error = f"内部错误：{type(e).__name__}: {e}"
+            job.error = t("job.internal_error", error=f"{type(e).__name__}: {e}")
             job.error_code = "internal"
-            job.message = "失败"
+            job.message = t("job.failed")
         finally:
             job.updated_at = db.now_iso()
             try:

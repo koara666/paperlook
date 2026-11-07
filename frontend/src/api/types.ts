@@ -16,6 +16,8 @@ export interface Job {
 }
 
 export interface Settings {
+  /** zh | en | ja | ko; "" until chosen */
+  language: string;
   daily_count: number;
   window_days: number;
   time_preference: "latest" | "balanced" | "relaxed";
@@ -26,10 +28,13 @@ export interface Settings {
   ai_rerank: boolean;
   auto_fetch_on_open: boolean;
   personalize: boolean;
+  prefer_reviews: boolean;
   ai: {
     base_url: string;
     model: string;
     thinking_for_analysis: boolean;
+    /** "auto" = interface language */
+    output_language: string;
     features: { translate: boolean; summary: boolean; modules: boolean; contributions: boolean };
     translate_appendix: boolean;
     keep_english_terms: boolean;
@@ -45,6 +50,12 @@ export interface Direction {
   keywords: string[];
   exclude: string[];
   categories: string[];
+  /** ISO 639-1 paper languages; empty = any */
+  languages: string[];
+  /** OpenAlex field ids; empty = any */
+  fields: string[];
+  /** own time window; null = the global one */
+  window_days: number | null;
   weight: number;
   enabled: boolean;
   sort_order: number;
@@ -52,15 +63,24 @@ export interface Direction {
 
 export interface DirectionPreset {
   key: string;
+  group: string;
   name: string;
   name_en: string;
   keywords: string[];
   categories: string[];
+  fields: string[];
+  languages: string[];
+  window_days: number | null;
 }
 
 export interface Meta {
   version: string;
+  language: string;
+  languages: { code: string; name: string }[];
+  paper_languages: { code: string; name: string }[];
   direction_presets: DirectionPreset[];
+  preset_groups: { id: string; name: string }[];
+  fields: { id: string; name: string }[];
   arxiv_categories: { id: string; name: string }[];
   ranking_presets: Record<string, { relevance: number; quality: number; freshness: number }>;
   time_preferences: Record<string, number>;
@@ -91,6 +111,8 @@ export interface PaperCard {
   pdf_url: string | null;
   categories: string[];
   sources: string[];
+  /** ISO 639-1 language of title/abstract */
+  language: string | null;
   state: PaperState;
 }
 
@@ -110,6 +132,8 @@ export interface Paper extends Omit<PaperCard, "state" | "sources" | "author_cou
 export interface QualitySignal {
   key: string;
   label: string;
+  /** compact label for badges */
+  short?: string;
   score: number;
   evidence?: string;
 }
@@ -126,6 +150,13 @@ export interface Breakdown {
   quality_insufficient: boolean;
   quality_signals: QualitySignal[];
   freshness: number;
+  /** survey / review / tutorial */
+  review?: boolean;
+  review_bonus?: number | null;
+  /** OpenAlex field id when outside the direction's fields */
+  field_mismatch?: string | null;
+  /** book review, editorial … */
+  minor?: boolean | null;
   weights: { relevance: number; quality: number; freshness: number };
   matched: { title: string[]; abstract: string[]; category: string | null };
 }
@@ -133,8 +164,12 @@ export interface Breakdown {
 export interface RecAI {
   relevance: number;
   reason: string;
-  title_zh: string;
+  /** translated title (1.3+); title_zh in older records */
+  title_tr?: string;
+  title_zh?: string;
   tldr: string;
+  /** output language of reason / title / tldr (absent = Chinese, before 1.3) */
+  lang?: string;
 }
 
 export interface AiStatusSummary {
@@ -187,6 +222,10 @@ export interface Batch {
     relevant?: number;
     ai_rerank?: { used: boolean; note?: string };
     hf_daily?: { matched: number; error: string | null };
+    hints?: {
+      widen_to?: number | null;
+      sparse?: { id: number; name: string; candidates: number; window: number; suggest: number }[];
+    };
   };
   message: string | null;
 }
@@ -209,6 +248,8 @@ export type AiKind = "summary" | "modules" | "contributions" | "abstract_transla
 
 export interface AiResult<T = any> {
   kind: string;
+  /** output language of this result */
+  lang?: string;
   content: T;
   basis: { type: "fulltext" | "abstract"; source_label?: string; reason?: string; truncated?: boolean; thinking?: boolean } | null;
   model: string;
@@ -225,6 +266,19 @@ export interface FeatureState<T = any> {
   enabled: boolean;
   upgradable?: boolean;
   progress?: { total: number; done: number; sections: Record<string, { total: number; done: number }> };
+  /** translate: languages with (other) existing translations */
+  other_languages?: string[];
+}
+
+export interface LanguageInfo {
+  /** AI output language */
+  target: string;
+  /** language of title / abstract */
+  paper: string | null;
+  /** language of the full text, when loaded */
+  fulltext: string | null;
+  translate_needed: boolean;
+  abstract_translate_needed: boolean;
 }
 
 export interface FulltextInfo {
@@ -239,6 +293,7 @@ export interface FulltextInfo {
 
 export interface PaperDetail {
   paper: Paper;
+  language: LanguageInfo;
   state: PaperState;
   recommendation: {
     score: number;
@@ -255,7 +310,7 @@ export interface PaperDetail {
     summary: FeatureState;
     modules: FeatureState;
     contributions: FeatureState;
-    abstract_translation: FeatureState<{ title_zh: string; abstract_zh: string }>;
+    abstract_translation: FeatureState<{ title?: string; abstract?: string; title_zh?: string; abstract_zh?: string }>;
     translate: FeatureState;
   };
   ai_configured: boolean;
@@ -306,7 +361,8 @@ export interface FulltextResponse {
   doc?: FullDoc;
   translations?: Record<string, { text: string; flags: string[] }>;
   translation_status?: { total: number; done: number; sections: Record<string, { total: number; done: number }> };
-  glossary?: { en: string; zh: string; keep: boolean }[];
+  glossary?: { src: string; tgt: string; keep: boolean }[];
+  language?: LanguageInfo;
   job?: Job | null;
 }
 
@@ -357,6 +413,8 @@ export interface AiConfig {
   model: string;
   models: string[];
   thinking_for_analysis: boolean;
+  output_language: string;
+  effective_output_language: string;
   secret_backend: string;
   last_test: ProviderConfig["last_test"];
 }

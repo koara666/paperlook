@@ -6,6 +6,7 @@ import re
 import xml.etree.ElementTree as ET
 from datetime import timedelta
 
+from .. import i18n
 from ..textutil import collapse_ws, latex_typography
 from .base import RateLimiter, RawPaper, Source, SourceError, SourceQuery, clean_doi, code_signals, get_with_retry, parse_date
 
@@ -33,7 +34,7 @@ def build_query(q: SourceQuery) -> str:
     if kws:
         parts.append("(" + " OR ".join(kws) + ")")
     if not parts:
-        raise SourceError("研究方向缺少关键词和分类", retryable=False)
+        raise SourceError(i18n.msg("src.arxiv_no_query"), retryable=False, code="config")
     # submittedDate is the v1 submission time (UTC) - i.e. first publication on arXiv.
     start = q.date_from.strftime("%Y%m%d") + "0000"
     end = (q.date_to + timedelta(days=1)).strftime("%Y%m%d") + "0000"
@@ -49,7 +50,7 @@ def parse_feed(xml_text: str) -> tuple[list[RawPaper], int]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
-        raise SourceError(f"arXiv 返回了无法解析的数据：{e}")
+        raise SourceError(i18n.msg("src.bad_data", source="arXiv", error=str(e)), code="bad_data")
     total_el = root.find("os:totalResults", NS)
     total = int(total_el.text) if total_el is not None and total_el.text else 0
     papers: list[RawPaper] = []
@@ -85,7 +86,8 @@ def parse_feed(xml_text: str) -> tuple[list[RawPaper], int]:
                 authors=[a for a in authors if a],
                 published=published,
                 date_quality="exact" if published else "unknown",
-                date_note="arXiv 首个版本 (v1) 提交日期" if published else None,
+                date_note="date.arxiv_v1" if published else None,
+                language="en",
                 updated=updated,
                 venue=None,
                 doi=doi,
@@ -105,11 +107,11 @@ def parse_feed(xml_text: str) -> tuple[list[RawPaper], int]:
 class ArxivSource(Source):
     id = "arxiv"
     name = "arXiv"
-    description = "计算机、数学、物理等领域最主要的预印本平台。每天更新，发布日期可靠，可获取全文（HTML/PDF）。"
+    description = "source.arxiv.desc"
     homepage = "https://arxiv.org"
     key_policy = "none"
     default_enabled = True
-    coverage = "预印本 · CS/AI/数学/物理/统计/电子工程"
+    coverage = "source.arxiv.coverage"
 
     def search(self, q: SourceQuery) -> list[RawPaper]:
         query = build_query(q)
@@ -132,8 +134,8 @@ class ArxivSource(Source):
                 resp = get_with_retry(API_URL, params=params, source_name="arXiv", limiter=limiter, timeout=90,
                                       attempts=2, backoff_429=5.0)
             except SourceError as e:
-                if "429" in e.message:
-                    raise SourceError("arXiv 暂时限制了访问频率（HTTP 429），稍后获取推荐时会自动重试") from None
+                if e.code == "rate_limit":
+                    raise SourceError(i18n.msg("src.arxiv_429"), code="rate_limit") from None
                 raise
             papers, total = parse_feed(resp.text)
             out.extend(papers)

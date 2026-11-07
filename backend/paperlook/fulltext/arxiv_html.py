@@ -19,7 +19,9 @@ _WS = re.compile(r"\s+")
 
 
 class HtmlNotAvailable(Exception):
-    pass
+    def __init__(self, reason: Any):
+        super().__init__(str(reason))
+        self.reason = reason  # a stored message (i18n) or plain text
 
 
 def _cls(el: Tag) -> list[str]:
@@ -35,7 +37,7 @@ class _Parser:
     def __init__(self, html: str, page_url: str):
         self.soup = BeautifulSoup(html, "lxml")
         self.page_url = page_url
-        self.b = DocBuilder("arxiv_html", "arXiv HTML（结构化全文）", page_url)
+        self.b = DocBuilder("arxiv_html", {"$t": "doc.src.arxiv_html"}, page_url)
         self.errors = 0
         self.svg_figures = 0
 
@@ -302,7 +304,8 @@ class _Parser:
             if tag:
                 number = tag.get_text(" ", strip=True).rstrip(".") or None
             title = self.inline(title_el, skip_tag=True)
-        sec = self.b.section(title or "（无标题章节）", level=min(level, 3), number=number, kind=kind)
+        sec = self.b.section(title, level=min(level, 3), number=number, kind=kind,
+                             title_key=None if title else "doc.untitled")
         for c in el.children:
             if c is title_el:
                 continue
@@ -321,7 +324,7 @@ class _Parser:
     def parse(self) -> dict[str, Any]:
         article = self.soup.find("article", class_="ltx_document")
         if article is None:
-            raise HtmlNotAvailable("页面不包含 LaTeXML 文档")
+            raise HtmlNotAvailable({"$t": "ft.html_not_latexml"})
         title_el = article.find(class_="ltx_title_document")
         self.b.doc["title"] = self.inline(title_el) if title_el else ""
 
@@ -354,17 +357,17 @@ class _Parser:
                 continue
             if child.name in ("figure", "div", "p", "table", "ul", "ol"):
                 if front is None:
-                    front = self.b.section("正文前内容", level=1, kind="front")
+                    front = self.b.section("", level=1, kind="front", title_key="doc.front")
                 self.handle(child, front, 1)
 
         body_paragraphs = sum(1 for s in self.b.doc["sections"] if s["kind"] in ("body", "appendix")
                               for blk in s["blocks"] if blk["type"] == "paragraph")
         if body_paragraphs < 3:
-            raise HtmlNotAvailable("HTML 版本内容过少，可能转换失败")
+            raise HtmlNotAvailable({"$t": "ft.html_too_short"})
         if self.errors:
-            self.b.warn(f"有 {self.errors} 处 LaTeX 命令未能被 arXiv 转换，已在文中省略。")
+            self.b.warn({"$t": "doc.warn.latex_errors", "p": {"n": self.errors}})
         if self.svg_figures:
-            self.b.warn(f"有 {self.svg_figures} 张矢量图无法在此显示，请查看原文 PDF。")
+            self.b.warn({"$t": "doc.warn.svg", "p": {"n": self.svg_figures}})
         # Move the front-matter section (teaser figures) right after the abstract.
         secs = self.b.doc["sections"]
         if front is not None and front in secs:

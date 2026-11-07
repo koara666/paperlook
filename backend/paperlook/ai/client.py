@@ -9,7 +9,7 @@ translation / analysis code does not care which provider is active (`settings.ai
   clearly (it is not retried), and asks callers for larger translation chunks (fewer requests).
   Gemini is not reachable from mainland China without a proxy: an optional proxy can be configured.
 - Every call is recorded in `api_usage` (token counts only - never prompt content or keys).
-- HTTP errors are mapped to clear Chinese messages with an error code the UI can act on.
+- HTTP errors are mapped to clear messages (in the interface language) with an error code the UI can act on.
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ import httpx
 
 from .. import config, db, secrets_store, settings_store
 from ..errors import AppError
+from ..i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ def is_configured(provider: str | None = None) -> bool:
 
 
 def not_configured_error() -> AIError:
-    return AIError(f"尚未配置 {provider_label()} API Key。请在「设置 → AI 服务」中填写后再使用 AI 功能。", "not_configured")
+    return AIError(t("ai.not_configured", provider=provider_label()), "not_configured")
 
 
 # ---------------------------------------------------------------------------------------------
@@ -167,13 +168,13 @@ class BaseClient:
         for attempt in range(2):
             res = self.chat(messages, json_mode=True, **kwargs)
             if res.finish_reason == "length":
-                last_err = AIError("模型输出被截断（超过最大输出长度）。", "truncated", retryable=True)
+                last_err = AIError(t("ai.truncated"), "truncated", retryable=True)
                 kwargs["max_tokens"] = min(int((kwargs.get("max_tokens") or 8000) * 2), 64000)
                 continue
             try:
                 return parse_json(res.content), res
             except ValueError as e:
-                last_err = AIError(f"模型返回的 JSON 格式无效：{e}", "bad_json", retryable=True)
+                last_err = AIError(t("ai.bad_json", error=str(e)), "bad_json", retryable=True)
                 log.warning("%s %s: invalid JSON (%s), %s", self.label, kwargs.get("kind") or "chat", e,
                             "retrying" if attempt == 0 else "giving up")
         assert last_err is not None
@@ -195,25 +196,25 @@ def _error_from_response(resp: httpx.Response) -> AIError:
     detail = detail.strip()
     code = resp.status_code
     if code == 401:
-        return AIError("API Key 无效或已被删除。请在「设置 → AI 服务」中检查 DeepSeek API Key。", "auth")
+        return AIError(t("ai.ds.auth"), "auth")
     if code == 402:
-        return AIError("DeepSeek 账户余额不足。请前往 platform.deepseek.com 充值后重试。", "balance")
+        return AIError(t("ai.ds.balance"), "balance")
     if code == 429:
-        return AIError("请求过于频繁，已触发 DeepSeek 限流。请稍后重试，或在设置中降低翻译并发数。", "rate_limit", retryable=True)
+        return AIError(t("ai.ds.rate_limit"), "rate_limit", retryable=True)
     if code in (400, 422):
         low = detail.lower()
         if "model" in low and ("not exist" in low or "not found" in low or "invalid" in low or "support" in low):
-            return AIError(f"模型不可用：{detail}。请在「设置 → AI 服务」中选择其他模型。", "model")
+            return AIError(t("ai.ds.model", detail=detail), "model")
         if "context" in low or "too long" in low or "maximum" in low:
-            return AIError(f"内容超出模型上下文长度：{detail}", "too_long")
-        return AIError(f"请求参数错误（HTTP {code}）：{detail or '无详细信息'}", "bad_request")
+            return AIError(t("ai.too_long", detail=detail), "too_long")
+        return AIError(t("ai.bad_request", status=code, detail=detail or t("ai.no_detail")), "bad_request")
     if code == 404:
-        return AIError("服务地址不正确（HTTP 404）。请检查「服务地址」，DeepSeek 官方地址为 https://api.deepseek.com。", "endpoint")
+        return AIError(t("ai.ds.endpoint"), "endpoint")
     if code == 503:
-        return AIError("DeepSeek 服务器繁忙（503），请稍后重试。", "overloaded", retryable=True)
+        return AIError(t("ai.overloaded", provider="DeepSeek"), "overloaded", retryable=True)
     if code >= 500:
-        return AIError(f"DeepSeek 服务暂时异常（HTTP {code}），请稍后重试。", "server", retryable=True)
-    return AIError(f"DeepSeek 返回错误（HTTP {code}）：{detail}", "unknown")
+        return AIError(t("ai.server", provider="DeepSeek", status=code), "server", retryable=True)
+    return AIError(t("ai.unknown", provider="DeepSeek", status=code, detail=detail), "unknown")
 
 
 class DeepSeekClient(BaseClient):
@@ -235,9 +236,9 @@ class DeepSeekClient(BaseClient):
         try:
             return self._http.request(method, f"{self.base_url}{path}", **kwargs)
         except httpx.TimeoutException:
-            raise AIError("请求 DeepSeek 超时。内容较长时模型需要更多时间，请稍后重试。", "timeout", retryable=True)
+            raise AIError(t("ai.timeout", provider="DeepSeek"), "timeout", retryable=True)
         except httpx.HTTPError as e:
-            raise AIError(f"无法连接到 DeepSeek 服务（{type(e).__name__}）。请检查网络连接和服务地址。", "network", retryable=True)
+            raise AIError(t("ai.ds.network", error=type(e).__name__), "network", retryable=True)
 
     # ---- metadata endpoints (free) ----
     def list_models(self) -> list[str]:
@@ -279,7 +280,7 @@ class DeepSeekClient(BaseClient):
         try:
             body = resp.json()
         except ValueError:
-            raise AIError("DeepSeek 返回了无法解析的响应。", "bad_response", retryable=True)
+            raise AIError(t("ai.bad_response", provider="DeepSeek"), "bad_response", retryable=True)
 
         choice = (body.get("choices") or [{}])[0]
         msg = choice.get("message") or {}
@@ -378,12 +379,11 @@ def _gemini_error(resp: httpx.Response, model: str) -> AIError:
     code = resp.status_code
 
     if "API_KEY_INVALID" in reasons or "api key not valid" in low or "api key expired" in low:
-        return AIError("Gemini API Key 无效或已过期。请在 Google AI Studio（aistudio.google.com/apikey）重新复制 Key。", "auth")
+        return AIError(t("ai.gm.auth"), "auth")
     if "location is not supported" in low or "not available in your country" in low:
-        return AIError("当前网络所在地区不支持 Gemini API（中国大陆、香港等地区不在支持范围内）。"
-                       "请把代理切换到美国、日本、新加坡、台湾等地区的节点后重试。", "region")
+        return AIError(t("ai.gm.region"), "region")
     if code == 403:
-        return AIError(f"这个 Key 没有权限使用 Gemini API：{msg[:200]}。请确认 Key 是在 Google AI Studio 创建的。", "auth")
+        return AIError(t("ai.gm.forbidden", detail=msg[:200]), "auth")
     if code == 429:
         violations = [v for d in details for v in (d.get("violations") or []) if isinstance(v, dict)]
         retry_after = None
@@ -395,38 +395,28 @@ def _gemini_error(resp: httpx.Response, model: str) -> AIError:
         zero = [v for v in violations if str(v.get("quotaValue") or "") == "0"] or (
             "limit: 0" in low and not violations)
         if zero:
-            return AIError(f"模型 {model} 不在你的免费额度内（每日上限为 0）。请在「设置 → AI 服务」改用 "
-                           f"{GEMINI_DEFAULT_MODELS[0]} 等免费模型，或在 Google AI Studio 为项目开通付费。", "quota_daily")
+            return AIError(t("ai.gm.zero_quota", model=model, free_model=GEMINI_DEFAULT_MODELS[0]), "quota_daily")
         if per_day:
             limit = str(per_day[0].get("quotaValue") or "").strip()
-            limit_text = f"每天 {limit} 次请求" if limit else "每日请求数"
-            return AIError(f"今天的 Gemini 免费额度已用完（{model}：{limit_text}）。额度在北京时间每天 "
-                           f"{gemini_reset_hour_beijing()}:00 重置；已完成的部分都已保存，之后可以继续。也可以在"
-                           f"「设置 → AI 服务」改用每日额度更多的模型（如 {GEMINI_DEFAULT_MODELS[0]}），或切换到 DeepSeek。",
-                           "quota_daily")
-        return AIError("请求过于频繁，触发了 Gemini 每分钟请求上限，正在自动等待后重试。", "rate_limit", retryable=True,
-                       retry_after=retry_after or 30.0)
+            limit_text = t("ai.gm.per_day", n=limit) if limit else t("ai.gm.daily_requests")
+            hour = gemini_reset_hour_beijing()
+            return AIError(t("ai.gm.quota_daily", model=model, limit=limit_text, hour=hour, hour_next=(hour + 1) % 24,
+                             free_model=GEMINI_DEFAULT_MODELS[0]), "quota_daily")
+        return AIError(t("ai.gm.rate_limit"), "rate_limit", retryable=True, retry_after=retry_after or 30.0)
     if code == 404 or (code == 400 and "model" in low and ("not found" in low or "not supported" in low)):
-        return AIError(f"模型不可用：{model}。请在「设置 → AI 服务」点击「测试连接」刷新模型列表后重新选择。", "model")
+        return AIError(t("ai.gm.model", model=model), "model")
     if code == 400:
         if "token" in low and ("exceed" in low or "too long" in low or "maximum" in low):
-            return AIError(f"内容超出模型上下文长度：{msg[:200]}", "too_long")
-        return AIError(f"请求参数错误（HTTP 400）：{msg[:300] or '无详细信息'}", "bad_request")
+            return AIError(t("ai.too_long", detail=msg[:200]), "too_long")
+        return AIError(t("ai.bad_request", status=400, detail=msg[:300] or t("ai.no_detail")), "bad_request")
     if code == 503 or "overloaded" in low:
-        return AIError("Gemini 服务器繁忙（503），请稍后重试。", "overloaded", retryable=True)
+        return AIError(t("ai.overloaded", provider="Gemini"), "overloaded", retryable=True)
     if code >= 500:
-        return AIError(f"Gemini 服务暂时异常（HTTP {code}），请稍后重试。", "server", retryable=True)
-    return AIError(f"Gemini 返回错误（HTTP {code}）：{msg[:300]}", "unknown")
+        return AIError(t("ai.server", provider="Gemini", status=code), "server", retryable=True)
+    return AIError(t("ai.unknown", provider="Gemini", status=code, detail=msg[:300]), "unknown")
 
 
-_BLOCK_REASONS = {
-    "SAFETY": "触发了安全过滤",
-    "RECITATION": "输出与已有文本高度重复（RECITATION）",
-    "PROHIBITED_CONTENT": "内容被判定为禁止处理",
-    "BLOCKLIST": "内容命中屏蔽词",
-    "SPII": "内容可能包含个人敏感信息",
-    "OTHER": "未说明的原因",
-}
+_BLOCK_REASONS = ("SAFETY", "RECITATION", "PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "OTHER")
 
 
 class GeminiClient(BaseClient):
@@ -450,19 +440,17 @@ class GeminiClient(BaseClient):
                 headers={"x-goog-api-key": api_key, "Content-Type": "application/json", "User-Agent": config.USER_AGENT},
             )
         except (ValueError, ImportError) as e:
-            raise AIError(f"代理地址无效：{e}。请填写类似 http://127.0.0.1:7890 的地址。", "proxy")
+            raise AIError(t("ai.gm.proxy_invalid", error=str(e)), "proxy")
 
     def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
         try:
             return self._http.request(method, f"{self.base_url}{path}", **kwargs)
         except httpx.TimeoutException:
-            raise AIError("请求 Gemini 超时。内容较长时模型需要更多时间，请稍后重试。", "timeout", retryable=True)
+            raise AIError(t("ai.timeout", provider="Gemini"), "timeout", retryable=True)
         except httpx.ProxyError:
-            raise AIError("无法连接到代理。请确认代理软件正在运行，且「代理地址」的端口正确。", "network", retryable=True)
+            raise AIError(t("ai.gm.proxy_down"), "network", retryable=True)
         except httpx.HTTPError as e:
-            raise AIError(f"无法连接到 Google Gemini 服务（{type(e).__name__}）。中国大陆无法直接访问 Google："
-                          "请开启代理软件的「系统代理」，或在「设置 → AI 服务」填写代理地址（如 http://127.0.0.1:7890）。",
-                          "network", retryable=True)
+            raise AIError(t("ai.gm.network", error=type(e).__name__), "network", retryable=True)
 
     def list_models(self) -> list[str]:
         out: list[str] = []
@@ -518,19 +506,20 @@ class GeminiClient(BaseClient):
         try:
             body = resp.json()
         except ValueError:
-            raise AIError("Gemini 返回了无法解析的响应。", "bad_response", retryable=True)
+            raise AIError(t("ai.bad_response", provider="Gemini"), "bad_response", retryable=True)
         block = (body.get("promptFeedback") or {}).get("blockReason")
         if block:
-            raise AIError(f"Gemini 拒绝处理这段内容（{_BLOCK_REASONS.get(block, block)}）。可以重试，或换用 DeepSeek。", "blocked")
+            why = t(f"ai.block.{block}") if block in _BLOCK_REASONS else block
+            raise AIError(t("ai.gm.blocked_prompt", reason=why), "blocked")
         cands = body.get("candidates") or []
         if not cands:
-            raise AIError("Gemini 没有返回结果，请重试。", "bad_response", retryable=True)
+            raise AIError(t("ai.gm.empty"), "bad_response", retryable=True)
         cand = cands[0]
         reason = cand.get("finishReason") or ""
         parts = (cand.get("content") or {}).get("parts") or []
         text = "".join(p.get("text") or "" for p in parts if isinstance(p, dict) and not p.get("thought"))
         if reason in _BLOCK_REASONS and not text.strip():
-            raise AIError(f"Gemini 中止了输出（{_BLOCK_REASONS[reason]}）。可以重试一次，或换用 DeepSeek。", "blocked")
+            raise AIError(t("ai.gm.blocked_output", reason=t(f"ai.block.{reason}")), "blocked")
         um = body.get("usageMetadata") or {}
         usage = {
             "prompt_tokens": int(um.get("promptTokenCount") or 0),
@@ -574,6 +563,14 @@ def _is_text_model(name: str) -> bool:
 
 # ---------------------------------------------------------------------------------------------
 
+def _first_object(t: str) -> dict[str, Any] | None:
+    try:
+        val, _ = json.JSONDecoder().raw_decode(t)
+    except json.JSONDecodeError:
+        return None
+    return val if isinstance(val, dict) and val else None
+
+
 def parse_json(text: str) -> dict[str, Any]:
     t = text.strip()
     if t.startswith("```"):
@@ -585,20 +582,23 @@ def parse_json(text: str) -> dict[str, Any]:
     except json.JSONDecodeError:
         start, end = t.find("{"), t.rfind("}")
         if start < 0 or end <= start:
-            raise ValueError("未找到 JSON 对象")
+            raise ValueError("no JSON object found")
         t = t[start:end + 1]
         try:
             val = json.loads(t)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            first = _first_object(t) if "Extra data" in str(e) else None
+            if first is not None:  # a complete object followed by more output (seen with DeepSeek)
+                return first
             fixed = _fix_closers(t)
             if fixed is None:
                 raise
             try:
                 val = json.loads(fixed)
             except json.JSONDecodeError:
-                raise ValueError(f"JSON 无法解析（括号已尝试修复）：{t[-80:]!r}") from None
+                raise ValueError(f"unparseable JSON (brackets repaired): {t[-80:]!r}") from None
     if not isinstance(val, dict):
-        raise ValueError("顶层不是 JSON 对象")
+        raise ValueError("top level is not a JSON object")
     return val
 
 

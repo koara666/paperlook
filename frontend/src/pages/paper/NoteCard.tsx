@@ -1,5 +1,6 @@
 import { Check, Loader2, NotebookPen, TriangleAlert } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../../i18n";
 import { usePaperState } from "../../api/hooks";
 import { Card, SectionTitle, Textarea } from "../../components/ui/primitives";
 
@@ -70,19 +71,19 @@ export function NoteCard({ paperId, note }: { paperId: string; note: string | nu
     <Card className="p-5 sm:p-6">
       <SectionTitle
         icon={<NotebookPen className="size-4" />}
-        title="我的笔记"
+        title={t("note.title")}
         extra={
           status === "pending" ? (
             <span className="inline-flex items-center gap-1 text-xs text-text-3">
-              <Loader2 className="size-3 animate-spin" /> 保存中
+              <Loader2 className="size-3 animate-spin" /> {t("note.saving")}
             </span>
           ) : status === "saved" ? (
             <span className="inline-flex items-center gap-1 text-xs text-success">
-              <Check className="size-3" /> 已保存
+              <Check className="size-3" /> {t("note.saved")}
             </span>
           ) : status === "error" ? (
             <button className="inline-flex items-center gap-1 text-xs text-danger hover:underline" onClick={() => save(text)}>
-              <TriangleAlert className="size-3" /> 保存失败，点击重试
+              <TriangleAlert className="size-3" /> {t("note.failed")}
             </button>
           ) : null
         }
@@ -95,11 +96,11 @@ export function NoteCard({ paperId, note }: { paperId: string; note: string | nu
             autoFocus={editing && !note}
             onChange={(e) => setText(e.target.value)}
             onBlur={() => setEditing(false)}
-            placeholder="记录你的想法、疑问、可借鉴的方法或实验设置……"
+            placeholder={t("note.placeholder")}
             className="resize-none overflow-hidden text-[14.5px] leading-relaxed"
             maxLength={20000}
           />
-          <p className="mt-2 text-xs text-text-3">自动保存在本机，可在论文库中按「有笔记」筛选或搜索笔记内容，导出 AI 分析时一并导出。</p>
+          <p className="mt-2 text-xs text-text-3">{t("note.help")}</p>
         </>
       ) : (
         <button
@@ -107,7 +108,7 @@ export function NoteCard({ paperId, note }: { paperId: string; note: string | nu
           className="flex w-full items-center gap-2 rounded-xl border border-dashed border-border-strong px-4 py-3.5 text-left text-[14px] text-text-3 transition-colors hover:border-accent/50 hover:bg-accent-soft/40 hover:text-accent-text"
         >
           <NotebookPen className="size-4 shrink-0" />
-          添加笔记：记录你的想法、疑问或可借鉴之处
+          {t("note.add")}
         </button>
       )}
     </Card>

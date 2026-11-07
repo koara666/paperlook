@@ -1,3 +1,5 @@
+import { t } from "../i18n";
+
 export class ApiError extends Error {
   status: number;
   code: string | null;
@@ -17,7 +19,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError("无法连接到 PaperLook 后台服务。请确认启动窗口仍在运行。", 0, "offline");
+    throw new ApiError(t("api.offline"), 0, "offline");
   }
   const text = await resp.text();
   let data: any = null;
@@ -29,7 +31,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
   }
   if (!resp.ok) {
-    const msg = (data && typeof data === "object" && (data.detail as string)) || `请求失败（HTTP ${resp.status}）`;
+    const msg = (data && typeof data === "object" && (data.detail as string)) || t("api.http_failed", { status: resp.status });
     throw new ApiError(typeof msg === "string" ? msg : JSON.stringify(msg), resp.status, data?.code ?? null);
   }
   return data as T;

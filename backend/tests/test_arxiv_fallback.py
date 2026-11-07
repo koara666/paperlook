@@ -1,6 +1,8 @@
 """When the arXiv API refuses us (HTTP 429), arXiv papers are fetched through OpenAlex instead."""
 from datetime import date
 
+from paperlook import i18n
+
 from paperlook.sources.base import RawPaper, SourceError
 from paperlook.sources.openalex import ARXIV_SOURCE, parse_work
 
@@ -19,7 +21,7 @@ def test_openalex_arxiv_work_is_an_arxiv_preprint_not_a_venue():
     assert p.arxiv_id == "2610.35374" and p.venue is None
     assert "openalex_source_id" not in p.signals  # arXiv's "venue statistics" must not count as quality
     assert p.url == "https://arxiv.org/abs/2610.35374" and p.pdf_url == "https://arxiv.org/pdf/2610.35374"
-    assert p.date_quality == "exact" and p.published.isoformat() == "2026-10-26" and "arXiv" in p.date_note
+    assert p.date_quality == "exact" and p.published.isoformat() == "2026-10-26" and "arXiv" in i18n.render_key(p.date_note, "en")
 
 
 def test_engine_falls_back_to_openalex_when_arxiv_refuses(tmp_db, monkeypatch):
@@ -33,7 +35,7 @@ def test_engine_falls_back_to_openalex_when_arxiv_refuses(tmp_db, monkeypatch):
     calls = []
 
     def arxiv_search(q):
-        raise SourceError("arXiv 暂时限制了访问频率（HTTP 429），稍后获取推荐时会自动重试")
+        raise SourceError(i18n.msg("src.arxiv_429"), code="rate_limit")
 
     def openalex_search(q, arxiv_only=False):
         calls.append(arxiv_only)
@@ -43,7 +45,7 @@ def test_engine_falls_back_to_openalex_when_arxiv_refuses(tmp_db, monkeypatch):
 
     monkeypatch.setattr(REGISTRY["arxiv"], "search", arxiv_search)
     monkeypatch.setattr(REGISTRY["openalex"], "search", openalex_search)
-    merged, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv", "openalex"], date(2026, 10, 21), date(2026, 10, 28))
+    merged, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv", "openalex"], 7, date(2026, 10, 28))
     assert calls == [False, True]
     assert stats["arxiv"]["fallback"] == {"via": "OpenAlex", "fetched": 1}
     assert {p.get("arxiv_id") for p in merged} == {"2610.35374", None}
@@ -51,8 +53,8 @@ def test_engine_falls_back_to_openalex_when_arxiv_refuses(tmp_db, monkeypatch):
     # No fallback when arXiv worked, or when OpenAlex is disabled.
     calls.clear()
     monkeypatch.setattr(REGISTRY["arxiv"], "search", lambda q: [])
-    _, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv", "openalex"], date(2026, 10, 21), date(2026, 10, 28))
+    _, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv", "openalex"], 7, date(2026, 10, 28))
     assert calls == [False] and "fallback" not in stats["arxiv"]
     monkeypatch.setattr(REGISTRY["arxiv"], "search", arxiv_search)
-    _, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv"], date(2026, 10, 21), date(2026, 10, 28))
+    _, stats = engine._fetch_pool(Job("recommend", None), [d], ["arxiv"], 7, date(2026, 10, 28))
     assert "fallback" not in stats["arxiv"]

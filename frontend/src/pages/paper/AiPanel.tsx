@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, FileText, KeyRound, Loader2, RotateCcw, Settings2, Sparkles } from "lucide-react";
+import { AlertCircle, FileText, KeyRound, Languages, Loader2, RotateCcw, Settings2, Sparkles } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { errorMessage } from "../../api/client";
@@ -7,7 +7,8 @@ import { useAiLabel, useRunAi } from "../../api/hooks";
 import type { AiKind, FeatureState, PaperDetail } from "../../api/types";
 import { useConfirm, useToast } from "../../components/ui/overlay";
 import { Badge, Button, Card, Notice, ProgressBar, Skeleton } from "../../components/ui/primitives";
-import { timeAgo, tokens } from "../../lib/format";
+import { cap, t } from "../../i18n";
+import { languageName, timeAgo, tokens } from "../../lib/format";
 
 export function useAiRunner(paperId: string) {
   const run = useRunAi(paperId);
@@ -18,7 +19,7 @@ export function useAiRunner(paperId: string) {
       { kind, force },
       {
         onSuccess: () => qc.invalidateQueries({ queryKey: ["paper", paperId] }),
-        onError: (e) => toast({ tone: "error", title: "无法开始", description: errorMessage(e) }),
+        onError: (e) => toast({ tone: "error", title: t("ai.cannot_start"), description: errorMessage(e) }),
       },
     );
 }
@@ -32,12 +33,12 @@ export function estimateTokens(detail: PaperDetail, outputK = 3): string {
 function Elapsed({ since }: { since?: string }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, []);
   if (!since) return null;
   const s = Math.max(0, Math.round((now - new Date(since).getTime()) / 1000));
-  return <span className="tabular-nums">{s < 60 ? `${s} 秒` : `${Math.floor(s / 60)} 分 ${s % 60} 秒`}</span>;
+  return <span className="tabular-nums">{s < 60 ? t("ai.elapsed_s", { s }) : t("ai.elapsed_ms", { m: Math.floor(s / 60), s: s % 60 })}</span>;
 }
 
 export function AiPanel({
@@ -64,6 +65,7 @@ export function AiPanel({
   const aiLabel = useAiLabel();
   const res = state.result;
   const job = state.job;
+  const target = detail.language?.target;
 
   if (!detail.ai_configured && !res) {
     return (
@@ -71,11 +73,11 @@ export function AiPanel({
         <div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-warning-soft text-warning">
           <KeyRound className="size-6" />
         </div>
-        <h3 className="text-base font-semibold text-text">需要先配置 {aiLabel} API Key</h3>
-        <p className="mx-auto mt-1.5 max-w-md text-sm text-text-2">{title}需要调用 {aiLabel} 模型。配置完成后回到这里点击按钮即可生成。</p>
+        <h3 className="text-base font-semibold text-text">{t("ai.need_key", { provider: aiLabel })}</h3>
+        <p className="mx-auto mt-1.5 max-w-md text-sm text-text-2">{t("ai.need_key_desc", { feature: title, provider: aiLabel })}</p>
         <Link to="/settings?s=ai">
           <Button variant="primary" className="mt-5" icon={<Settings2 className="size-4" />}>
-            前往配置
+            {t("ai.go_configure")}
           </Button>
         </Link>
       </Card>
@@ -84,9 +86,9 @@ export function AiPanel({
 
   if (state.status === "disabled") {
     return (
-      <Notice tone="neutral" icon={<AlertCircle className="size-4" />} title={`「${title}」功能已关闭`}
-        action={<Link to="/settings?s=features"><Button size="sm">去开启</Button></Link>}>
-        你在设置中关闭了此功能，因此不会显示生成按钮。
+      <Notice tone="neutral" icon={<AlertCircle className="size-4" />} title={t("ai.disabled", { feature: title })}
+        action={<Link to="/settings?s=features"><Button size="sm">{t("ai.enable")}</Button></Link>}>
+        {t("ai.disabled_desc")}
       </Notice>
     );
   }
@@ -95,13 +97,13 @@ export function AiPanel({
     return (
       <Card className="px-6 py-6">
         <div className="flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-accent-soft text-accent">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-accent-soft text-accent">
             <Loader2 className="size-5 animate-spin" />
           </span>
           <div className="min-w-0 flex-1">
-            <div className="font-semibold text-text">正在生成{title}…</div>
+            <div className="font-semibold text-text">{t("ai.generating", { feature: title })}</div>
             <div className="mt-0.5 text-[13px] text-text-2">
-              {job?.message} · 已用时 <Elapsed since={job?.created_at} />
+              {job?.message} · {t("ai.elapsed")} <Elapsed since={job?.created_at} />
             </div>
           </div>
         </div>
@@ -112,7 +114,7 @@ export function AiPanel({
           <Skeleton className="h-4 w-5/6" />
           <Skeleton className="h-24 w-full rounded-xl" />
         </div>
-        <p className="mt-4 text-xs text-text-3">可以离开此页面，生成会在后台继续；完成后结果会自动保存。</p>
+        <p className="mt-4 text-xs text-text-3">{t("ai.background")}</p>
       </Card>
     );
   }
@@ -124,31 +126,33 @@ export function AiPanel({
       <Card className="overflow-hidden">
         <div className="px-6 py-8 sm:px-8">
           <div className="flex size-12 items-center justify-center rounded-2xl bg-accent-soft text-accent">{icon}</div>
-          <h3 className="mt-4 text-lg font-semibold text-text">{title}</h3>
+          <h3 className="mt-4 text-lg font-semibold text-text">{cap(title)}</h3>
           <p className="mt-1 max-w-xl text-sm leading-relaxed text-text-2">{description}</p>
           <ul className="mt-4 grid max-w-xl grid-cols-1 gap-1.5 sm:grid-cols-2">
             {outputs.map((o) => (
               <li key={o} className="flex items-center gap-2 text-[13px] text-text-2">
-                <span className="size-1 rounded-full bg-accent" />
+                <span className="size-1 shrink-0 rounded-full bg-accent" />
                 {o}
               </li>
             ))}
           </ul>
           {failed && (
-            <Notice tone="danger" icon={<AlertCircle className="size-4" />} title="上次生成失败" className="mt-5">
+            <Notice tone="danger" icon={<AlertCircle className="size-4" />} title={t("ai.last_failed")} className="mt-5">
               {job!.error}
             </Notice>
           )}
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <Button variant="primary" size="lg" icon={failed ? <RotateCcw className="size-4" /> : <Sparkles className="size-4" />} onClick={() => runAi(kind)}>
-              {failed ? "重试" : `生成${title}`}
+              {failed ? t("common.retry") : t("ai.generate", { feature: title })}
             </Button>
-            <span className="flex items-center gap-1.5 text-[13px] text-text-3">
+            <span className="flex flex-wrap items-center gap-1.5 text-[13px] text-text-3">
               <FileText className="size-3.5" />
-              {ftReady ? `基于全文（${detail.fulltext!.source_label}）` : "将自动获取全文；无法获取时仅基于摘要"}
-              <span className="text-border-strong">·</span>预计约 {estimateTokens(detail)} tokens
+              {ftReady ? t("ai.basis_fulltext_src", { source: detail.fulltext!.source_label }) : t("ai.basis_auto")}
+              <span className="text-border-strong">·</span>
+              {t("ai.estimate", { tokens: estimateTokens(detail) })}
             </span>
           </div>
+          {target && <p className="mt-3 text-[12px] text-text-3">{t("ai.output_lang", { language: languageName(target) })}</p>}
         </div>
       </Card>
     );
@@ -156,53 +160,66 @@ export function AiPanel({
 
   const basis = res.basis;
   const usage = res.usage || {};
+  const otherLang = !!(res.lang && target && res.lang !== target);
   return (
     <div className="space-y-4 animate-fade-in">
+      {otherLang && (
+        <Notice
+          tone="accent"
+          icon={<Languages className="size-4" />}
+          title={t("ai.other_lang", { language: languageName(res.lang) })}
+          action={
+            <Button size="sm" variant="primary" onClick={() => runAi(kind, true)}>
+              {t("ai.regenerate_in", { language: languageName(target) })}
+            </Button>
+          }
+        >
+          {t("ai.other_lang_desc")}
+        </Notice>
+      )}
       {basis?.type === "abstract" && (
         <Notice
           tone="warning"
           icon={<AlertCircle className="size-4" />}
-          title="以下内容仅基于摘要生成"
+          title={t("ai.abstract_only")}
           action={
             state.upgradable ? (
               <Button size="sm" variant="primary" onClick={() => runAi(kind, true)}>
-                基于全文重新生成
+                {t("ai.regenerate_fulltext")}
               </Button>
             ) : undefined
           }
         >
-          {basis.reason ? `原因：${basis.reason}` : "未能获取全文。"} 涉及实验细节和模块的内容可能不完整，请以原文为准。
+          {basis.reason ? t("ai.abstract_reason", { reason: basis.reason }) : t("ai.no_fulltext")} {t("ai.abstract_caveat")}
         </Notice>
       )}
       {state.job?.status === "failed" && state.job.error && (
-        <Notice tone="danger" icon={<AlertCircle className="size-4" />} title="重新生成失败，以下为之前的结果">
+        <Notice tone="danger" icon={<AlertCircle className="size-4" />} title={t("ai.regen_failed")}>
           {state.job.error}
         </Notice>
       )}
       {children(res.content)}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface-2 px-4 py-2.5 text-xs text-text-3">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Badge tone={basis?.type === "fulltext" ? "success" : "warning"}>{basis?.type === "fulltext" ? "基于全文" : "仅基于摘要"}</Badge>
-          {basis?.thinking && <Badge tone="accent">深度思考</Badge>}
+          <Badge tone={basis?.type === "fulltext" ? "success" : "warning"}>{basis?.type === "fulltext" ? t("ai.based_fulltext") : t("ai.based_abstract")}</Badge>
+          {basis?.thinking && <Badge tone="accent">{t("ai.thinking")}</Badge>}
           <span>{res.model}</span>
-          <span>{timeAgo(res.created_at)}生成</span>
+          <span>{t("ai.generated_at", { when: timeAgo(res.created_at) })}</span>
           {(usage.prompt_tokens || usage.completion_tokens) && (
-            <span>
-              消耗 {tokens((usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0))} tokens
-            </span>
+            <span>{t("ai.used_tokens", { tokens: tokens((usage.prompt_tokens ?? 0) + (usage.completion_tokens ?? 0)) })}</span>
           )}
-          <span>内容由 AI 生成，可能存在错误，关键信息请核对原文</span>
+          <span>{t("ai.disclaimer")}</span>
         </div>
         <Button
           size="xs"
           variant="ghost"
           icon={<RotateCcw className="size-3.5" />}
           onClick={async () => {
-            if (await confirm({ title: `重新生成${title}？`, description: `将再次调用 ${aiLabel}（预计约 ${estimateTokens(detail)} tokens），新结果会覆盖当前内容。`, confirmText: "重新生成" }))
+            if (await confirm({ title: t("ai.regen_q", { feature: title }), description: t("ai.regen_desc", { provider: aiLabel, tokens: estimateTokens(detail) }), confirmText: t("ai.regenerate") }))
               runAi(kind, true);
           }}
         >
-          重新生成
+          {t("ai.regenerate")}
         </Button>
       </div>
     </div>

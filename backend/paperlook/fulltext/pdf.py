@@ -21,7 +21,10 @@ _NUM = re.compile(r"^((?:Appendix\s+)?(?:[A-Z]|\d+)(?:\.\d+)*\.?|[IVX]+\.)\s+(.+
 _CAPTION = re.compile(r"^(?:\*\*)?((?:Figure|Fig\.|Table|Algorithm)\s*[A-Z]?\d+[a-z]?)(?:\*\*)?\s*[:.|]\s*(.*)$", re.I | re.S)
 _REF_START = re.compile(r"^\[\d+\]\s")
 _MATH_ALNUM = re.compile(r"[\U0001D400-\U0001D7FF]")
-_REF_HEADINGS = {"references", "bibliography", "reference", "参考文献"}
+# Reference-list headings in the languages papers are written in (CJK papers: 参考文献 / 引用文献 / 참고문헌 …).
+_REF_HEADINGS = {"references", "bibliography", "reference", "literature cited", "works cited", "参考文献", "引用文献",
+                 "参考資料", "文献", "注", "참고문헌", "참고 문헌", "literatur", "literaturverzeichnis", "bibliographie",
+                 "références", "referencias", "bibliografía", "riferimenti bibliografici", "список литературы"}
 
 
 def _clean_inline(text: str) -> str:
@@ -72,7 +75,7 @@ def _md_table(lines: list[str]) -> list[list[dict[str, Any]]]:
 
 def markdown_to_doc(md: str, source_label: str, source_url: str) -> dict[str, Any]:
     b = DocBuilder("pdf", source_label, source_url)
-    b.warn("该全文来自 PDF 文本提取：公式可能无法完整保留（以原样文本显示且不翻译），图片无法显示，表格可能不完整。")
+    b.warn({"$t": "doc.warn.pdf"})
     md = _PICTURE_TEXT.sub("\n\n", md)
     md = _HTML_COMMENT.sub("", md)
 
@@ -86,7 +89,7 @@ def markdown_to_doc(md: str, source_label: str, source_url: str) -> dict[str, An
     def ensure_sec() -> dict[str, Any]:
         nonlocal sec
         if sec is None:
-            sec = b.section("正文前内容", level=1, kind="front")
+            sec = b.section("", level=1, kind="front", title_key="doc.front")
         return sec
 
     def flush_para() -> None:
@@ -123,7 +126,7 @@ def markdown_to_doc(md: str, source_label: str, source_url: str) -> dict[str, An
         if not text:
             return
         if _looks_like_formula(text):
-            DocBuilder.add(s, {"type": "unparsed", "text": text, "note": "公式（从 PDF 提取，可能不完整）"})
+            DocBuilder.add(s, {"type": "unparsed", "text": text, "note": {"$t": "doc.unparsed_formula"}})
         else:
             DocBuilder.add(s, {"type": "paragraph", "text": text})
 
@@ -178,10 +181,10 @@ def markdown_to_doc(md: str, source_label: str, source_url: str) -> dict[str, An
                 number, title = nm.group(1).rstrip("."), nm.group(2)
             if low in _REF_HEADINGS:
                 kind = "references"
-            elif low == "abstract":
+            elif low in ("abstract", "摘要", "要旨", "要約", "概要", "초록", "요약"):
                 sec = b.section("Abstract", level=1, kind="abstract")
                 continue
-            elif low.startswith("appendix") or (kind in ("references", "appendix") and number and number[0].isalpha()):
+            elif low.startswith(("appendix", "附录", "付録", "부록")) or (kind in ("references", "appendix") and number and number[0].isalpha()):
                 kind = "appendix"
             elif kind == "references":
                 kind = "appendix"
@@ -209,7 +212,7 @@ def parse_pdf(data: bytes, source_label: str, source_url: str) -> dict[str, Any]
     doc = pymupdf.open(stream=data, filetype="pdf")
     try:
         if doc.page_count == 0:
-            raise ValueError("PDF 没有页面")
+            raise ValueError({"$t": "ft.pdf_empty"})
         pages = list(range(min(doc.page_count, MAX_PAGES)))
         try:
             md = pymupdf4llm.to_markdown(doc, pages=pages, use_ocr=False, header=False, footer=False, show_progress=False)
@@ -222,9 +225,9 @@ def parse_pdf(data: bytes, source_label: str, source_url: str) -> dict[str, Any]
                 pymupdf4llm.use_layout(True)
         result = markdown_to_doc(md, source_label, source_url)
         if doc.page_count > MAX_PAGES:
-            result["warnings"].append(f"PDF 共 {doc.page_count} 页，仅解析了前 {MAX_PAGES} 页。")
+            result["warnings"].append({"$t": "doc.warn.pages", "p": {"pages": doc.page_count, "max": MAX_PAGES}})
         if result["stats"]["words"] < 200:
-            raise ValueError("几乎没有提取到文字（可能是扫描版 PDF）")
+            raise ValueError({"$t": "ft.pdf_scanned"})
         return result
     finally:
         doc.close()

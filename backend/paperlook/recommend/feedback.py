@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .. import db
+from ..i18n import msg
 
 MAX_ADJUST = 0.15
 SCALE = 0.08
@@ -32,6 +33,8 @@ TOP_K = 3
 SHOWN = 0.03  # adjustments smaller than this are not mentioned in the reasons
 
 _WORD = re.compile(r"[a-z][a-z0-9\-]{2,}")
+# Runs of CJK characters (no spaces between words): represented by overlapping character bigrams.
+_CJK_RUN = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]{2,}")
 _STOP = set("""
 about above across after again against also among an and any are as at based be been before being below
 between both but by can could did do does doing down during each either few for from further had has have
@@ -44,7 +47,7 @@ existing study studies demonstrate demonstrates achieve achieves present present
 furthermore moreover significantly state-of-the-art experiments experimental extensive task tasks
 """.split())
 
-KIND_LABEL = {"starred": "收藏", "noted": "写过笔记", "analyzed": "用 AI 分析过", "opened": "读过", "dismissed": "标记为不感兴趣"}
+KINDS = ("starred", "noted", "analyzed", "opened", "dismissed")
 
 
 @dataclass
@@ -78,6 +81,8 @@ def tokens(title: str | None, abstract: str | None) -> Counter[str]:
             if len(w) > 4 and w.endswith("s") and not w.endswith("ss"):
                 w = w[:-1]  # crude plural folding: "networks" ~ "network"
             out.append(w)
+        for run in _CJK_RUN.findall(t or ""):
+            out.extend(run[i:i + 2] for i in range(len(run) - 1))
         return out
 
     tw = words(title)
@@ -171,10 +176,11 @@ def preferences(candidates: list[dict[str, Any]], feedback: list[dict[str, Any]]
     return out
 
 
-def reason(pref: Preference | None) -> str | None:
+def reason(pref: Preference | None) -> dict[str, Any] | None:
     if not pref or abs(pref.adjust) < SHOWN or not pref.title:
         return None
     title = pref.title if len(pref.title) <= 60 else pref.title[:58] + "…"
     if pref.adjust > 0:
-        return f"与你{KIND_LABEL.get(pref.kind or '', '关注')}的《{title}》相近"
-    return f"与你标记为不感兴趣的《{title}》相近，已降低排序"
+        kind = pref.kind if pref.kind in KINDS else "opened"
+        return msg("fb.similar", kind=msg(f"fb.kind.{kind}"), title=title)
+    return msg("fb.similar_dismissed", title=title)

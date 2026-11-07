@@ -86,6 +86,6 @@ def create_app(allowed_ports: set[int] | None = None) -> FastAPI:
     else:
         @app.get("/", include_in_schema=False)
         async def no_frontend():
-            return JSONResponse({"detail": "前端尚未构建：请在 frontend 目录运行 npm run build"}, status_code=503)
+            return JSONResponse({"detail": "Frontend not built: run npm run build in frontend/"}, status_code=503)
 
     return app

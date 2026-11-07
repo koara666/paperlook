@@ -7,11 +7,12 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from .. import __version__, db, directions as dirs, secrets_store, settings_store
+from .. import __version__, db, directions as dirs, i18n, secrets_store, settings_store
 from ..ai import prompts
 from ..ai import client as ai_client
 from ..ai.client import DEFAULT_MODELS, GEMINI_DEFAULT_MODELS, PROVIDERS, AIError, get_client, is_configured
 from ..errors import AppError
+from ..i18n import t
 from ..sources import REGISTRY
 
 router = APIRouter(tags=["settings"])
@@ -34,8 +35,13 @@ def patch_settings(patch: dict[str, Any]):
 def meta():
     return {
         "version": __version__,
-        "direction_presets": dirs.PRESETS,
-        "arxiv_categories": dirs.ARXIV_CATEGORIES,
+        "language": i18n.current(),
+        "languages": [{"code": c, "name": i18n.LANG_NAMES[c]} for c in i18n.LANGS],
+        "paper_languages": [{"code": c, "name": t(f"plang.{c}")} for c in dirs.PAPER_LANGUAGES],
+        "direction_presets": dirs.presets(),
+        "preset_groups": dirs.preset_groups(),
+        "fields": dirs.fields(),
+        "arxiv_categories": dirs.arxiv_categories(),
         "ranking_presets": settings_store.RANKING_PRESETS,
         "time_preferences": settings_store.TIME_PREFERENCE_HALF_LIFE,
         "default_models": DEFAULT_MODELS,
@@ -49,6 +55,9 @@ class DirectionIn(BaseModel):
     keywords: list[str] = []
     exclude: list[str] = []
     categories: list[str] = []
+    languages: list[str] = []
+    fields: list[str] = []
+    window_days: int | None = None
     weight: int = 3
     enabled: bool = True
 
@@ -74,10 +83,11 @@ class PresetsIn(BaseModel):
 def add_presets(body: PresetsIn):
     existing = {d["name"] for d in dirs.list_directions()}
     created = []
-    for p in dirs.PRESETS:
+    for p in dirs.presets():
         if p["key"] in body.keys and p["name"] not in existing:
-            created.append(dirs.create_direction({"name": p["name"], "keywords": p["keywords"],
-                                                  "categories": p["categories"], "weight": 3}))
+            created.append(dirs.create_direction({
+                "name": p["name"], "keywords": p["keywords"], "categories": p["categories"], "fields": p["fields"],
+                "languages": p["languages"], "window_days": p["window_days"], "weight": 3}))
     if created:
         settings_store.update_settings({"onboarded": True})
     return created
@@ -88,7 +98,7 @@ def update_direction(direction_id: int, body: dict[str, Any]):
     try:
         return dirs.update_direction(direction_id, body)
     except KeyError:
-        raise AppError("研究方向不存在", status_code=404)
+        raise AppError(t("err.direction_not_found"), status_code=404)
     except ValueError as e:
         raise AppError(str(e))
 
@@ -108,21 +118,29 @@ class SuggestIn(BaseModel):
 def suggest_keywords(body: SuggestIn):
     """Explicit, user-triggered AI call: suggest keywords/categories for a direction."""
     if not body.name.strip():
-        raise AppError("请先填写研究方向名称")
+        raise AppError(t("err.direction_name_first"))
     client = get_client()
+    cats, fields = dirs.arxiv_categories(), dirs.fields()
     try:
         data, _ = client.chat_json(
-            [{"role": "system", "content": prompts.SUGGEST_SYSTEM},
-             {"role": "user", "content": prompts.suggest_task(body.name.strip(), body.description.strip(), dirs.ARXIV_CATEGORIES)}],
+            [{"role": "system", "content": prompts.suggest_system()},
+             {"role": "user", "content": prompts.suggest_task(body.name.strip(), body.description.strip(), cats, fields,
+                                                              i18n.current())}],
             thinking=False, max_tokens=2000, temperature=0.3, kind="suggest_keywords")
     finally:
         client.close()
-    valid_cats = {c["id"] for c in dirs.ARXIV_CATEGORIES}
-    kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()][:15]
+    valid_cats = {c["id"] for c in cats}
+    kws = [str(k).strip() for k in data.get("keywords", []) if str(k).strip()][:16]
+    try:
+        window = int(data.get("window_days") or 0) or None
+    except (TypeError, ValueError):
+        window = None
     return {
         "keywords": kws,
         "exclude": [str(k).strip() for k in data.get("exclude", []) if str(k).strip()][:10],
         "categories": [c for c in data.get("categories", []) if c in valid_cats][:4],
+        "fields": [str(f) for f in data.get("fields", []) if str(f) in dirs.FIELDS][:3],
+        "window_days": max(1, min(365, window)) if window else None,
     }
 
 
@@ -132,7 +150,7 @@ def _last_source_stats() -> dict[str, Any]:
     r = db.query_one("SELECT stats, created_at FROM rec_batches ORDER BY id DESC LIMIT 1")
     if not r:
         return {}
-    stats = db.loads(r["stats"], {}).get("sources", {})
+    stats = i18n.render(db.loads(r["stats"], {}).get("sources", {}))
     return {k: {**v, "at": r["created_at"]} for k, v in stats.items()}
 
 
@@ -149,8 +167,7 @@ def list_sources():
         out.append(info)
     hf = settings["signals"].get("hf_daily", True)
     return {"sources": out, "signals": [{
-        "id": "hf_daily", "name": "Hugging Face 社区热度", "enabled": hf,
-        "description": "用 Hugging Face Daily Papers 的点赞数作为 arXiv 论文的社区关注度信号（仅影响排序，不作为论文来源）。",
+        "id": "hf_daily", "name": t("source.hf.name"), "enabled": hf, "description": t("source.hf.desc"),
     }]}
 
 
@@ -168,7 +185,7 @@ def patch_source(source_id: str, body: SourcePatch):
         return list_sources()
     src = REGISTRY.get(source_id)
     if not src:
-        raise AppError("未知的论文来源", status_code=404)
+        raise AppError(t("err.unknown_source"), status_code=404)
     if body.enabled is not None:
         settings_store.update_settings({"sources": {source_id: body.enabled}})
     if src.key_secret:
@@ -220,6 +237,8 @@ def _ai_config() -> dict[str, Any]:
         "base_url": active["base_url"],
         "last_test": active["last_test"],
         "thinking_for_analysis": s["thinking_for_analysis"],
+        "output_language": s.get("output_language", "auto"),
+        "effective_output_language": prompts.output_language(),
         "secret_backend": secrets_store.backend_name(),
     }
 
@@ -228,7 +247,7 @@ def _provider(name: str | None) -> str:
     if name is None:
         return ai_client.active_provider()
     if name not in PROVIDERS:
-        raise AppError("未知的 AI 服务", status_code=400)
+        raise AppError(t("err.unknown_provider"), status_code=400)
     return name
 
 
@@ -247,9 +266,7 @@ def set_key(body: KeyIn):
     provider = _provider(body.provider)
     key = body.api_key.strip()
     if len(key) < 10 or " " in key:
-        hint = ("从 DeepSeek 开放平台复制完整的 Key（通常以 sk- 开头）" if provider == "deepseek"
-                else "从 Google AI Studio 复制完整的 Key（通常以 AIza 开头）")
-        raise AppError(f"API Key 格式不正确，请{hint}。")
+        raise AppError(t("err.key_format_deepseek" if provider == "deepseek" else "err.key_format_gemini"))
     secrets_store.set_secret(PROVIDERS[provider]["secret"], key)
     db.cache_set(f"{provider}_last_test", None)
     return _ai_config()
@@ -276,7 +293,7 @@ def test_ai(body: TestIn):
     label = PROVIDERS[provider]["label"]
     key = (body.api_key or "").strip() or secrets_store.get_secret(PROVIDERS[provider]["secret"])
     if not key:
-        raise AppError("请先填写 API Key", code="not_configured")
+        raise AppError(t("err.key_missing"), code="not_configured")
     client = ai_client.make_client(provider, key, timeout=60)
     model = client.model
     result: dict[str, Any] = {"ok": False, "steps": [], "at": db.now_iso(), "provider": provider}
@@ -286,10 +303,11 @@ def test_ai(body: TestIn):
             models = client.list_models()
             db.cache_set(f"{provider}_models", models)
             result["models"] = models
-            shown = models if len(models) <= 8 else models[:8] + [f"等 {len(models)} 个"]
-            result["steps"].append({"name": "身份验证", "ok": True, "detail": f"可用模型：{', '.join(shown) or '未返回'}"})
+            shown = models if len(models) <= 8 else models[:8] + [t("test.more_models", n=len(models))]
+            result["steps"].append({"name": t("test.auth"), "ok": True,
+                                    "detail": t("test.models", models=", ".join(shown) or t("test.none_returned"))})
         except AIError as e:
-            result["steps"].append({"name": "身份验证", "ok": False, "detail": e.message})
+            result["steps"].append({"name": t("test.auth"), "ok": False, "detail": e.message})
             result["error"] = e.message
             result["error_code"] = e.code
             return _finish_test(result, body, provider)
@@ -298,21 +316,22 @@ def test_ai(body: TestIn):
                 bal = client.balance()
                 if bal is not None:
                     infos = bal.get("balance_infos") or []
-                    text = "，".join(f"{b.get('total_balance')} {b.get('currency')}" for b in infos) or "未知"
+                    text = ", ".join(f"{b.get('total_balance')} {b.get('currency')}" for b in infos) or t("test.unknown")
                     result["balance"] = {"available": bal.get("is_available"), "infos": infos}
-                    result["steps"].append({"name": "账户余额", "ok": bool(bal.get("is_available")),
-                                            "detail": f"余额 {text}" + ("" if bal.get("is_available") else "（余额不足，无法调用）")})
+                    result["steps"].append({"name": t("test.balance"), "ok": bool(bal.get("is_available")),
+                                            "detail": t("test.balance_ok" if bal.get("is_available") else "test.balance_low",
+                                                        balance=text)})
             except AIError as e:
-                result["steps"].append({"name": "账户余额", "ok": False, "detail": e.message})
+                result["steps"].append({"name": t("test.balance"), "ok": False, "detail": e.message})
         if body.chat:
             try:
                 res = client.chat([{"role": "user", "content": "Reply with the single word: OK"}], thinking=False,
                                   max_tokens=8, kind="connection_test", retries=1)
-                result["steps"].append({"name": f"模型调用（{model}）", "ok": True,
-                                        "detail": f"响应正常，用时 {time.monotonic() - t0:.1f} 秒"})
+                result["steps"].append({"name": t("test.call", model=model), "ok": True,
+                                        "detail": t("test.call_ok", seconds=f"{time.monotonic() - t0:.1f}")})
                 result["model_used"] = res.model
             except AIError as e:
-                result["steps"].append({"name": f"模型调用（{model}）", "ok": False, "detail": e.message})
+                result["steps"].append({"name": t("test.call", model=model), "ok": False, "detail": e.message})
                 result["error"] = e.message
                 result["error_code"] = e.code
                 return _finish_test(result, body, provider)
@@ -320,7 +339,7 @@ def test_ai(body: TestIn):
         if not result["ok"] and not result.get("error"):
             result["error"] = next(st["detail"] for st in result["steps"] if not st["ok"])
         if result["ok"]:
-            result["message"] = f"{label} API 可以正常使用"
+            result["message"] = t("test.ok", provider=label)
         return _finish_test(result, body, provider)
     finally:
         client.close()
@@ -340,6 +359,7 @@ class AIPrefs(BaseModel):
     base_url: str | None = None
     model: str | None = None
     thinking_for_analysis: bool | None = None
+    output_language: str | None = None
     gemini_model: str | None = None
     gemini_base_url: str | None = None
     gemini_proxy: str | None = None
@@ -357,9 +377,9 @@ def patch_ai(body: AIPrefs):
     if "proxy" in gemini:
         gemini["proxy"] = gemini["proxy"].strip()
         if gemini["proxy"] and not _PROXY_RE.match(gemini["proxy"]):
-            raise AppError("代理地址格式不正确。请填写类似 http://127.0.0.1:7890 的地址（支持 http、https、socks5）。")
+            raise AppError(t("err.proxy_format"))
     if "base_url" in gemini and gemini["base_url"].strip() and not re.match(r"^https?://", gemini["base_url"].strip()):
-        raise AppError("服务地址需要以 https:// 开头。")
+        raise AppError(t("err.base_url_format"))
     if gemini:
         patch["gemini"] = gemini
     if patch:

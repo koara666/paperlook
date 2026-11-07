@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useSettings } from "./api/hooks";
 import { AppShell } from "./components/layout/AppShell";
+import { t, useLang } from "./i18n";
 import { applyTheme } from "./lib/theme";
 import LibraryPage from "./pages/LibraryPage";
 import PaperPage from "./pages/PaperPage";
@@ -14,6 +15,10 @@ export default function App() {
   useEffect(() => {
     if (theme) applyTheme(theme);
   }, [theme]);
+  const { lang } = useLang();
+  useEffect(() => {
+    if (!location.pathname.startsWith("/paper/")) document.title = t("app.title");
+  }, [lang]);
 
   return (
     <AppShell>

@@ -2,6 +2,7 @@
 import httpx
 import pytest
 
+from paperlook import i18n
 from paperlook.sources import base
 from paperlook.sources.base import SourceError, get_with_retry
 
@@ -35,7 +36,9 @@ def test_429_gives_up_with_clear_message(monkeypatch):
     monkeypatch.setattr(base, "http", lambda: FakeClient([_resp(429, {"Retry-After": "999"})] * 3))
     with pytest.raises(SourceError) as e:
         get_with_retry("https://x", source_name="OpenAlex")
-    assert "429" in e.value.message and "每日" not in e.value.message
+    assert e.value.code == "rate_limit"
+    with i18n.use("zh"):
+        assert "429" in e.value.text and "每日" not in e.value.text
 
 
 def test_arxiv_429_message_and_single_request_per_direction(monkeypatch):
@@ -48,7 +51,7 @@ def test_arxiv_429_message_and_single_request_per_direction(monkeypatch):
 
     def fake_get(url, *, params=None, **kw):
         seen.append(params)
-        raise SourceError("arXiv 限制了访问频率（HTTP 429）")
+        raise SourceError("arXiv 429", code="rate_limit")
 
     monkeypatch.setattr("paperlook.sources.arxiv.get_with_retry", fake_get)
     q = SourceQuery(keywords=["graph neural network"], exclude=[], categories=["cs.LG"],
@@ -56,7 +59,10 @@ def test_arxiv_429_message_and_single_request_per_direction(monkeypatch):
     with pytest.raises(SourceError) as e:
         ArxivSource().search(q)
     assert seen[0]["max_results"] == 200 and len(seen) == 1
-    assert "自动重试" in e.value.message and "429" in e.value.message
+    with i18n.use("zh"):
+        assert "自动重试" in e.value.text and "429" in e.value.text
+    with i18n.use("en"):
+        assert "retried" in e.value.text and "429" in e.value.text
 
 
 def test_partial_pool_is_reused_only_briefly(tmp_db, monkeypatch):

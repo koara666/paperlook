@@ -3,13 +3,15 @@ from __future__ import annotations
 
 from .arxiv import ArxivSource
 from .base import RawPaper, Source, SourceError, SourceQuery
+from .cinii import CiNiiSource
 from .openalex import OpenAlexSource
 from .pubmed import PubMedSource
 from .semantic_scholar import SemanticScholarSource
 
-REGISTRY: dict[str, Source] = {s.id: s for s in (ArxivSource(), OpenAlexSource(), SemanticScholarSource(), PubMedSource())}
+REGISTRY: dict[str, Source] = {s.id: s for s in (ArxivSource(), OpenAlexSource(), CiNiiSource(), SemanticScholarSource(),
+                                                  PubMedSource())}
 
 # Priority when merging duplicate records (lower = preferred for title/abstract).
-PRIORITY = {"arxiv": 0, "openalex": 1, "semantic_scholar": 2, "pubmed": 3}
+PRIORITY = {"arxiv": 0, "openalex": 1, "semantic_scholar": 2, "pubmed": 3, "cinii": 4}
 
 __all__ = ["REGISTRY", "PRIORITY", "RawPaper", "Source", "SourceError", "SourceQuery"]

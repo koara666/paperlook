@@ -12,6 +12,17 @@ if str(ROOT) not in sys.path:
 os.environ["PAPERLOOK_DISABLE_KEYRING"] = "1"
 
 
+@pytest.fixture(autouse=True)
+def chinese_system(monkeypatch):
+    """Tests are written against the Chinese texts; CI machines run an English OS."""
+    from paperlook import i18n
+
+    monkeypatch.setattr(i18n, "system_language", lambda: "zh")
+    i18n.invalidate()
+    yield
+    i18n.invalidate()
+
+
 @pytest.fixture()
 def tmp_db(tmp_path, monkeypatch):
     from paperlook import config, db, secrets_store

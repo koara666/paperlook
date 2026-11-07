@@ -114,3 +114,11 @@ def test_api_messages_follow_the_language(client):
     assert client.get("/api/papers/nope").json()["detail"] == "論文が見つかりません"
     sources = client.get("/api/sources").json()["sources"]
     assert any(s["id"] == "cinii" and "日本語" in s["description"] for s in sources)
+
+
+def test_without_a_choice_the_system_language_is_used(tmp_db, monkeypatch):
+    from paperlook import i18n
+
+    monkeypatch.setattr(i18n, "system_language", lambda: "en")
+    i18n.invalidate()
+    assert i18n.current() == "en" and i18n.t("lang.zh") == i18n.t("lang.zh", "en")
